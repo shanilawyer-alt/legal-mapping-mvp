@@ -9,11 +9,9 @@ import { DocumentUpload } from "@/components/assessment/document-upload";
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function AssessmentShell({
-  token,
   sections,
   initialAnswers,
 }: {
-  token: string;
   sections: QuestionnaireSection[];
   initialAnswers: AnswerMap;
 }) {
@@ -31,10 +29,14 @@ export function AssessmentShell({
   async function persistAnswer(questionId: string, value: AnswerValue) {
     setSaveStateByQuestion((prev) => ({ ...prev, [questionId]: "saving" }));
     try {
+      // No token/identifier in the body — identity comes from the
+      // HttpOnly session cookie, sent automatically with this same-origin
+      // request (Phase 1.1 hardening; see lib/security/sessionCookie.ts).
       const res = await fetch("/api/assessments/answers", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, questionId, value }),
+        body: JSON.stringify({ questionId, value }),
       });
       setSaveStateByQuestion((prev) => ({
         ...prev,
@@ -72,7 +74,7 @@ export function AssessmentShell({
             </div>
             <SaveIndicator state={saveStateByQuestion[item.id]} />
             {item.documentRequest ? (
-              <DocumentUpload token={token} documentType={item.documentRequest} label={item.documentRequest} />
+              <DocumentUpload documentType={item.documentRequest} label={item.documentRequest} />
             ) : null}
           </div>
         ))}

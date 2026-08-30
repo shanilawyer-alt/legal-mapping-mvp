@@ -3,9 +3,11 @@ import type {
   Answer,
   AnswerSource,
   Assessment,
+  AssessmentSession,
   AssessmentStatus,
   AuditEventInput,
   DocumentRecord,
+  NewAssessmentSessionInput,
   NewDocumentInput,
   NewOrganizationInput,
   Organization,
@@ -13,6 +15,7 @@ import type {
 import type {
   AnswerRepository,
   AssessmentRepository,
+  AssessmentSessionRepository,
   AuditRepository,
   CreateAssessmentInput,
   DocumentRepository,
@@ -31,6 +34,7 @@ export function createInMemoryRepositories(): Repositories {
   const assessments = new Map<string, Assessment>();
   const answersByAssessment = new Map<string, Map<string, Answer>>();
   const documents = new Map<string, DocumentRecord>();
+  const sessions = new Map<string, AssessmentSession>();
   const auditLog: AuditEventInput[] = [];
 
   const organizationRepo: OrganizationRepository = {
@@ -163,11 +167,37 @@ export function createInMemoryRepositories(): Repositories {
     },
   };
 
+  const assessmentSessionRepo: AssessmentSessionRepository = {
+    async create(input: NewAssessmentSessionInput): Promise<AssessmentSession> {
+      const existing = [...sessions.values()].find(
+        (s) => s.sessionTokenHash === input.sessionTokenHash,
+      );
+      if (existing) {
+        throw new Error("session_token_hash must be unique");
+      }
+      const session: AssessmentSession = {
+        id: randomUUID(),
+        assessmentId: input.assessmentId,
+        sessionTokenHash: input.sessionTokenHash,
+        expiresAt: input.expiresAt.toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      sessions.set(session.id, session);
+      return session;
+    },
+    async findByTokenHash(sessionTokenHash: string): Promise<AssessmentSession | null> {
+      return (
+        [...sessions.values()].find((s) => s.sessionTokenHash === sessionTokenHash) ?? null
+      );
+    },
+  };
+
   return {
     organizations: organizationRepo,
     assessments: assessmentRepo,
     answers: answerRepo,
     audit: auditRepo,
     documents: documentRepo,
+    assessmentSessions: assessmentSessionRepo,
   };
 }

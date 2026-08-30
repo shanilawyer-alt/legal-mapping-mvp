@@ -2,9 +2,11 @@ import type {
   Answer,
   AnswerSource,
   Assessment,
+  AssessmentSession,
   AssessmentStatus,
   AuditEventInput,
   DocumentRecord,
+  NewAssessmentSessionInput,
   NewDocumentInput,
   NewOrganizationInput,
   Organization,
@@ -61,10 +63,16 @@ export interface DocumentRepository {
   markDeleted(id: string): Promise<void>;
 }
 
+export interface AssessmentSessionRepository {
+  create(input: NewAssessmentSessionInput): Promise<AssessmentSession>;
+  findByTokenHash(sessionTokenHash: string): Promise<AssessmentSession | null>;
+}
+
 export interface Repositories {
   organizations: OrganizationRepository;
   assessments: AssessmentRepository;
   answers: AnswerRepository;
   audit: AuditRepository;
   documents: DocumentRepository;
+  assessmentSessions: AssessmentSessionRepository;
 }

@@ -33,6 +33,13 @@ export interface Assessment {
   submittedAt: string | null;
   approvedAt: string | null;
   approvedBy: string | null;
+  /**
+   * `null` means "retention policy not yet configured by an attorney" —
+   * NOT "retain indefinitely by design." There is no automatic deletion
+   * job in Phase 1 regardless of this value; deletion remains a manual
+   * admin action either way. Do not treat `null` as an intentional
+   * indefinite-retention decision anywhere this field is read.
+   */
   retentionDays: number | null;
   createdAt: string;
   updatedAt: string;
@@ -82,6 +89,25 @@ export interface NewDocumentInput {
   sizeBytes: number;
   sha256: string;
   uploadStatus: DocumentUploadStatus;
+}
+
+/**
+ * A short-lived session minted after an assessment token is first
+ * resolved (see domain/assessment/session.ts). Only its hash is
+ * persisted, mirroring `Assessment.secureTokenHash`.
+ */
+export interface AssessmentSession {
+  id: string;
+  assessmentId: string;
+  sessionTokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface NewAssessmentSessionInput {
+  assessmentId: string;
+  sessionTokenHash: string;
+  expiresAt: Date;
 }
 
 export interface AuditEventInput {

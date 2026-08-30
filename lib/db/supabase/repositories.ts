@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AnswerRepository,
   AssessmentRepository,
+  AssessmentSessionRepository,
   AuditRepository,
   CreateAssessmentInput,
   DocumentRepository,
@@ -13,9 +14,11 @@ import type {
   Answer,
   AnswerSource,
   Assessment,
+  AssessmentSession,
   AssessmentStatus,
   AuditEventInput,
   DocumentRecord,
+  NewAssessmentSessionInput,
   NewDocumentInput,
   NewOrganizationInput,
   Organization,
@@ -186,7 +189,32 @@ export function createSupabaseRepositories(client: SupabaseClient): Repositories
     },
   };
 
-  return { organizations, assessments, answers, audit, documents };
+  const assessmentSessions: AssessmentSessionRepository = {
+    async create(input: NewAssessmentSessionInput): Promise<AssessmentSession> {
+      const { data, error } = await client
+        .from("assessment_sessions")
+        .insert({
+          assessment_id: input.assessmentId,
+          session_token_hash: input.sessionTokenHash,
+          expires_at: input.expiresAt.toISOString(),
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return mapAssessmentSession(data);
+    },
+    async findByTokenHash(sessionTokenHash: string): Promise<AssessmentSession | null> {
+      const { data, error } = await client
+        .from("assessment_sessions")
+        .select()
+        .eq("session_token_hash", sessionTokenHash)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? mapAssessmentSession(data) : null;
+    },
+  };
+
+  return { organizations, assessments, answers, audit, documents, assessmentSessions };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -239,6 +267,17 @@ function mapDocument(row: any): DocumentRecord {
     uploadStatus: row.upload_status,
     uploadedAt: row.uploaded_at,
     deletedAt: row.deleted_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapAssessmentSession(row: any): AssessmentSession {
+  return {
+    id: row.id,
+    assessmentId: row.assessment_id,
+    sessionTokenHash: row.session_token_hash,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
   };
 }
 

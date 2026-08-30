@@ -118,7 +118,7 @@ create table assessments (
   submitted_at timestamptz,
   approved_at timestamptz,
   approved_by uuid references admin_profiles (id),
-  retention_days integer, -- null = no automatic expiry (OPEN_QUESTIONS.md #6)
+  retention_days integer, -- null = policy not yet configured, NOT "retain indefinitely" (OPEN_QUESTIONS.md #6). No automatic deletion job exists regardless of this value in Phase 1.
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

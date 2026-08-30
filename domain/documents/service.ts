@@ -5,16 +5,21 @@ import type { Repositories } from "@/lib/db/repositories";
 import type { DocumentRecord } from "@/lib/db/types";
 import type { DocumentStore } from "@/lib/storage/types";
 import { validateDocumentUpload } from "@/lib/storage/validation";
-import { resolveAssessmentByToken, type AssessmentAccessError } from "@/domain/assessment/service";
+import {
+  resolveAssessmentBySessionToken,
+  type AssessmentAccessError,
+} from "@/domain/assessment/session";
 
 /**
- * Document upload, scoped by verified assessment token — mirrors the
- * isolation pattern in domain/assessment/service.ts (token in, never a
- * caller-supplied assessmentId).
+ * Document upload, scoped by a verified assessment session (Phase 1.1
+ * hardening — mirrors the isolation pattern in
+ * domain/assessment/session.ts: session token in, never a caller-supplied
+ * assessmentId).
  *
  * This module stores files and structured metadata only. It does not call
- * any AI provider and does not read file content beyond hashing it — see
- * lib/storage/types.ts and MASTER_BUILD_SPEC.md §9 for why that wiring is
+ * any AI provider and does not read file content beyond hashing it and
+ * sniffing its type signature (lib/security/fileSignature.ts) — see
+ * lib/storage/types.ts and MASTER_BUILD_SPEC.md §9 for why AI wiring is
  * deliberately absent in Phase 1.
  */
 
@@ -22,25 +27,26 @@ export type UploadDocumentResult =
   | { ok: true; document: DocumentRecord }
   | { ok: false; error: AssessmentAccessError | "validation"; message?: string };
 
-export interface UploadDocumentForTokenInput {
-  rawToken: string;
+export interface UploadDocumentForSessionInput {
+  rawSessionToken: string;
   documentType: string;
   originalFilename: string;
   mimeType: string;
   data: Buffer;
 }
 
-export async function uploadDocumentForToken(
+export async function uploadDocumentForSession(
   repos: Repositories,
   store: DocumentStore,
-  input: UploadDocumentForTokenInput,
+  input: UploadDocumentForSessionInput,
 ): Promise<UploadDocumentResult> {
-  const resolved = await resolveAssessmentByToken(repos, input.rawToken);
+  const resolved = await resolveAssessmentBySessionToken(repos, input.rawSessionToken);
   if (!resolved.ok) return resolved;
 
   const validationError = validateDocumentUpload({
     mimeType: input.mimeType,
     sizeBytes: input.data.byteLength,
+    data: input.data,
   });
   if (validationError) {
     return { ok: false, error: "validation", message: validationError.message };

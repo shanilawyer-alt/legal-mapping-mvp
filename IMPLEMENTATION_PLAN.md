@@ -1,5 +1,14 @@
 # Implementation Plan — Legal Mapping MVP
 
+> **Revision note (Phase 1.1)**: this document was corrected after a Phase 1
+> review found it described several files/components that were never
+> actually built (`/lib/ai`, `/domain/rules`, `/lib/audit`, a `--write-db`
+> CSV-import flag, several routes). Section 3's repository layout and §9
+> now describe the actual as-built system, not an earlier intention. Where
+> something was aspirational and never implemented, it has been removed
+> rather than left to mislead a future reader. Section 11 documents the
+> Phase 1.1 hardening changes.
+
 ## 1. Source data summary
 
 All seven CSVs plus the reference Excel workbook (`data/reference/legal_mapping_rule_engine_v1.xlsx`) were read in full before any code was written.
@@ -16,66 +25,70 @@ All seven CSVs plus the reference Excel workbook (`data/reference/legal_mapping_
 
 Question ID prefixes and counts: GEN 12, EMP 7, PAY 5, TIME 16, SOC 8, HR 4, TERM 7, LIT 2, FR 14, PRIV 28 = 103, matching the "103 שאלות מאסטר" total stated in the workbook's own overview sheet.
 
-## 2. Data-integrity finding (see OPEN_QUESTIONS.md #1)
+## 2. Data-integrity finding — resolved, approved
 
-`questionnaire.csv` and `rule_catalog.csv`, as committed to the repository, contained **only their header row** (e.g. `questionnaire.csv` was 7 bytes: `ID` and a trailing newline). The underlying data exists verbatim in the accompanying reference workbook, on sheets `Master Questionnaire` (103 questions, 12 columns, identical header labels) and `מנוע ניתוח` (42 rules, 17 columns, identical header labels, "Rule Catalog V1" title row).
+`questionnaire.csv` and `rule_catalog.csv`, as originally committed to the repository, contained **only their header row** (e.g. `questionnaire.csv` was 7 bytes: `ID` and a trailing newline). The underlying data exists verbatim in the accompanying reference workbook, on sheets `Master Questionnaire` (103 questions, 12 columns, identical header labels) and `מנוע ניתוח` (42 rules, 17 columns, identical header labels, "Rule Catalog V1" title row).
 
-Per constraint #5 ("do not alter legal Rule IDs, severity values, questionnaire IDs, or Hebrew client wording without explicitly documenting a proposed change"), this is documented as a proposed change rather than a silent edit:
+Both CSVs were regenerated as a verbatim, cell-by-cell transcription of those two workbook sheets — no Rule ID, question ID, severity value, condition, or Hebrew wording was altered, reworded, or invented. **This reconstruction has been explicitly approved**: the empty CSVs were confirmed to be a packaging defect, and the workbook's 103 questions and 42 rules are the intended V1 source material, to be preserved verbatim. The files live at `data/questionnaire.csv` and `data/rule_catalog.csv`.
 
-- The two CSVs were regenerated **verbatim** from the workbook sheets (no wording, ID, severity, or logic changes — a byte-for-byte transcription of every cell, including all Hebrew text, punctuation, and quote characters).
-- All 103 question IDs and all 42 rule IDs, plus every cross-reference between them (rule "קלטים"/inputs listing question IDs, questionnaire "מתי מוצג" triggers), were checked for internal consistency (§9 below).
-- The two files were relocated from repo root to `data/`, alongside the other five CSVs and the reference workbook, matching both the README's instruction ("Place the CSV files under `/data`") and the suggested repository structure in the spec (§4).
+Verification performed: row counts match the workbook's own summary tab; all 42 rule IDs are unique; all 103 question IDs are unique; cross-references between the two files and `document_analysis_matrix.csv` were checked for dangling IDs (`scripts/import-csv.ts` / `tests/csv-validation.test.ts`).
 
 ## 3. Architecture
 
-- **Framework**: Next.js (App Router), TypeScript strict mode, React 18+.
-- **Database**: PostgreSQL via Supabase, plain SQL migrations under `supabase/migrations/`, Row Level Security on every table.
-- **Auth**: Supabase Auth (email/password) for attorney/admin accounts only. Client respondents never get a Supabase Auth identity — they use the token flow (§4).
+- **Framework**: Next.js 16 (App Router), TypeScript strict mode, React 19.
+- **Database**: PostgreSQL via Supabase, plain SQL migrations under `supabase/migrations/`, Row Level Security on every table. **Not yet applied to any live database** — see §10.
+- **Auth**: Supabase Auth (email/password) for attorney/admin accounts only. Client respondents never get a Supabase Auth identity — they use the token/session flow (§4).
 - **Validation**: Zod schemas for every CSV row shape, every API request body, and environment variables at boot.
-- **Storage**: Supabase Storage, private bucket, abstracted behind a `DocumentStore` interface (`/lib/storage`) so the backing provider can change without touching callers.
-- **AI abstraction**: A `FactExtractor` provider interface is defined (`/lib/ai`) for later phases but is **not wired to the document pipeline in Phase 1** — no document bytes or extracted text are sent anywhere. This satisfies the "do not transmit documents to an AI model yet" constraint literally: the interface exists (so Phase 4 doesn't need a redesign) but has zero callers.
-- **Testing**: Vitest for unit tests (CSV validation, branching evaluator, token isolation). No live Supabase instance is available in this build environment, so DB-touching logic is tested through an in-memory implementation of the same repository interfaces the real Supabase adapter implements (a hexagonal/ports-and-adapters seam) — this is also good practice independent of the sandbox constraint.
+- **Storage**: Supabase Storage, private bucket, abstracted behind a `DocumentStore` interface (`lib/storage/`) so the backing provider can change without touching callers.
+- **AI**: no AI provider integration exists anywhere in this codebase. No document content or extracted text is sent anywhere. This is not an abstraction waiting to be wired up — nothing AI-related has been built yet, deliberately (spec Phase 4).
+- **Testing**: Vitest. Unit tests cover CSV validation, the branching parser/evaluator, token/session generation and isolation, file-signature sniffing, and document-upload validation. Integration-level tests exercise the actual public API route handlers (`tests/api-*.integration.test.ts`) with `lib/db`/`lib/storage` mocked to in-memory implementations — no live Supabase project is reachable from this build environment (§10).
 
-### Repository layout (matches spec §4)
+### Actual repository layout (as built)
 
 ```
 /app
-  /(public)/assessment/[token]      client questionnaire
-  /(admin)/admin                    admin dashboard (auth-gated)
+  /(public)/assessment/page.tsx            questionnaire UI — reads the session cookie, no token in its URL
+  /(public)/assessment/assessment-shell.tsx  client-side form/autosave/branching
+  /(public)/assessment/[token]/route.ts    token-exchange endpoint only (Phase 1.1) — GET, sets the session cookie, redirects
+  /(admin)/admin                           admin dashboard (auth-gated), create-assessment form
   /(admin)/admin/login
-  /(admin)/admin/assessments/[id]
-  /api/assessments                  create assessment, issue token
-  /api/assessments/token/[token]    token-authenticated read/write of one assessment
-  /api/documents                    upload/list (private, signed URLs only)
-/components/{assessment,admin,findings,documents}
+  /api/assessments/answers                 session-scoped answer read/write
+  /api/documents                           session-scoped document upload
+/components
+  /assessment    question-field, document-upload, access-error
 /domain
-  /questionnaire   loading, typing, section grouping
-  /branching       condition parser + evaluator (no eval())
-  /rules           typed rule-condition parser (reuses branching grammar), NOT evaluated yet
-  /documents       DocumentStore interface + types
-  /reports         (stub, Phase 6)
+  /questionnaire   loading, typing, section grouping (data/generated/questionnaire.json, built from questionnaire.csv)
+  /branching       condition parser + evaluator (no eval()) — questionnaire trigger logic only
+  /csv             Zod row schemas + generic CSV parser + referential-integrity checks, for all 7 CSVs
+  /assessment      assessment-token issuance/resolution (service.ts) + session issuance/resolution (session.ts, Phase 1.1)
+  /documents       upload orchestration (validation, hashing, storage call, audit)
 /lib
-  /ai              provider interface, no implementation wired to documents yet
-  /db              Supabase server client, repository interfaces + Supabase adapters + in-memory test adapters
-  /security        token hashing, env validation, security headers
-  /audit           audit_events writer
-/data              the 7 CSVs + reference workbook (source of truth, read-only at runtime)
-/scripts           import-and-validate CSVs
-/tests             vitest unit tests
+  /db          repository interfaces (ports) + Supabase adapter + in-memory test adapter
+  /security    token/session generation+hashing, file-signature sniffing, env validation, session-cookie config
+  /storage     DocumentStore interface + Supabase Storage adapter + upload validation
+  /supabase    Supabase server client + auth middleware helpers
+/data          the 7 CSVs + reference workbook (source of truth, read-only at runtime)
+/scripts       import-and-validate CSVs (no database-writing mode exists — see §9)
+/tests         vitest unit + integration tests
 /supabase/migrations
 ```
 
-## 4. Secure token-based assessment access
+**What does not exist, despite an earlier draft of this document describing it**: `/lib/ai`, `/domain/rules`, `/lib/audit` as a standalone module (audit writing is inline via `AuditRepository` in `lib/db`), `/components/admin`, `/components/findings`, `/components/documents`, a POST `/api/assessments` REST route (assessment creation is a Next.js Server Action, `app/(admin)/admin/create-assessment-action.ts`), and `/app/(admin)/admin/assessments/[id]` (there is no per-assessment admin detail view — the admin app has a login screen and a create-assessment form, nothing else). None of these are required by Phase 1 or Phase 1.1; build them only in the phase that actually needs them, per your instruction.
 
-- On assessment creation, the server generates 32 random bytes (`crypto.randomBytes`), base64url-encodes them as the client-facing token, and stores only `sha256(token)` in `assessments.secure_token_hash` plus `token_expires_at`.
-- The public route is `/(public)/assessment/[token]`. Every server action/API call under it re-hashes the supplied token and does a constant-time-safe equality lookup (`WHERE secure_token_hash = $1 AND token_expires_at > now()`), never a token-prefix or partial match.
-- Every table reachable from the client path (`answers`, `documents`) is scoped by `assessment_id`; the API layer additionally re-derives `assessment_id` from the verified token on every request rather than trusting a client-supplied `assessment_id`, so a client cannot swap IDs in a request body to read another assessment.
-- RLS: client-side (anon-key) access is denied by default on all tables. All questionnaire read/write for the public flow goes through server-side API routes using the service role, after token verification — the anon key never talks to Postgres directly for assessment data. This is stricter than "RLS keyed on token" because raw tokens are never in the database to compare against inside a policy (only hashes are stored, and RLS predicates can't easily hash a claim), so token verification is enforced in the trusted server layer while RLS provides defense-in-depth by blocking the anon/public role entirely.
-- Unit tests (Task 12) simulate two assessments and assert that assessment B's token can never read or write assessment A's answers/documents through the service functions.
+## 4. Assessment access: token-exchange to a session (Phase 1.1)
+
+This section describes the hardened design; see §11 for why it changed from the original Phase 1 version.
+
+- **Assessment token** (issued once, by an admin): `crypto.randomBytes(32)` → base64url, 256 bits of entropy. Only `HMAC-SHA256(pepper, token)` is stored, in `assessments.secure_token_hash`. The raw token is shown to the admin exactly once and is meant to be sent to the client as a link; it is never persisted anywhere.
+- **Token exchange**: the client's first visit to `/assessment/<token>` hits `app/(public)/assessment/[token]/route.ts`, a GET-only Route Handler (not a page). It resolves the token, and on success mints a brand-new, independently-random **session token**, stores only its hash in `assessment_sessions.session_token_hash`, sets it as an `HttpOnly; Secure; SameSite=Lax` cookie (`assessment_session`), and redirects (HTTP redirect, not a client-side navigation) to the clean URL `/assessment` — no token, no query string identifying the assessment. On failure it redirects to `/assessment?error=not_found` or `?error=expired`.
+- **Ongoing session**: every subsequent page load of `/assessment`, and every call to `/api/assessments/answers` or `/api/documents`, reads the `assessment_session` cookie server-side (`request.cookies.get(...)` in Route Handlers, `cookies()` from `next/headers` in the page). The cookie is `HttpOnly`, so client-side JavaScript cannot read or exfiltrate it; the browser attaches it automatically to same-origin requests.
+- **Session lifetime**: capped at 24 hours, and additionally can never outlive its parent assessment token's own expiry (`sessionExpiresAt = min(now + 24h, assessment.tokenExpiresAt)`). If a session expires mid-questionnaire, revisiting the original link mints a fresh one — the underlying assessment token (and any partially-completed answers, which are keyed by `assessment_id`, not by session) is unaffected.
+- **Isolation**: every session-scoped operation (`getAnswersForSession`, `submitAnswerForSession`, `uploadDocumentForSession`) takes only a raw session token as input and derives `assessmentId` from it server-side — never from a client-supplied field. `tests/session-isolation.test.ts` and `tests/api-*.integration.test.ts` prove this directly, including a test that a malicious request body claiming a different `assessmentId` has no effect.
+- **RLS**: unchanged in spirit from the original design — client-side (anon-key) access is denied by default on every table, including the new `assessment_sessions`. All public-flow reads/writes go through server-side code using the service-role client, after token or session verification in application code. RLS remains defense-in-depth, not the primary enforcement mechanism, for the same reason as before (§ "Token verification" in `OPEN_QUESTIONS.md`): a Postgres policy cannot itself hash an incoming claim to compare against a stored hash without either storing raw credentials or adding a parallel session-claim mechanism.
 
 ## 5. Deterministic branching framework (Phase 1 scope)
 
-FIRST_PROMPT_FOR_CLAUDE_CODE.md lists "deterministic branching framework" as a Phase 1 deliverable, distinct from "Rule Engine" tests. Read together with MASTER_BUILD_SPEC.md (where the Rule Engine is explicitly Phase 3, §23), this is interpreted as: **the questionnaire's own trigger/visibility logic** (spec §6 — `GEN-06 > 0` opens freelancers, etc.), not full rule evaluation. See OPEN_QUESTIONS.md #2.
+FIRST_PROMPT_FOR_CLAUDE_CODE.md lists "deterministic branching framework" as a Phase 1 deliverable, distinct from "Rule Engine" tests. Read together with MASTER_BUILD_SPEC.md (where the Rule Engine is explicitly Phase 3, §23), this is interpreted as: **the questionnaire's own trigger/visibility logic** (spec §6 — `GEN-06 > 0` opens freelancers, etc.), not full rule evaluation. This interpretation has been explicitly approved; full Rule Engine evaluation remains Phase 3.
 
 All 96 conditional question triggers in `questionnaire.csv` were checked against a grammar:
 
@@ -86,45 +99,52 @@ op          := '=' | '≠' | '>'
 value       := token ('/' token)*              // '/' = one-of for equality
 ```
 
-95 of 96 match this grammar exactly. The one exception (`TIME-07 כולל שעות נוספות גלובליות`, "includes X") appears only inside `rule_catalog.csv` conditions (not as a question-visibility trigger), so it does not block the questionnaire branching framework; a `כולל`/"includes" operator is included in the shared evaluator for forward compatibility with the Rule Engine phase, and is unit-tested, but no questionnaire trigger currently needs it.
+95 of 96 match this grammar exactly. The one exception (`TIME-07 כולל שעות נוספות גלובליות`, "includes X") appears only inside `rule_catalog.csv` conditions (not as a question-visibility trigger), so it does not block the questionnaire branching framework; a `כולל`/"includes" operator is included in the shared evaluator and is unit-tested, but no questionnaire trigger currently needs it.
 
-Implementation: a small recursive-descent parser (`/domain/branching/parser.ts`) turns each trigger string into a typed AST once at CSV-import time (not per-render), and a pure evaluator function (`/domain/branching/evaluate.ts`) walks the AST against the current `Record<questionId, answerValue>`. No `eval`, `new Function`, or template-based code generation is used anywhere.
+Implementation: a small recursive-descent parser (`domain/branching/parser.ts`) turns each trigger string into a typed AST once at CSV-import time (not per-render), and a pure evaluator function (`domain/branching/evaluate.ts`) walks the AST against the current `Record<questionId, answerValue>`. No `eval`, `new Function`, or template-based code generation is used anywhere.
 
 ## 6. Risk scoring, freelancer screening, Rule Engine
 
-Not implemented in Phase 1 (spec Phase 3). The condition-parser grammar above is written generically enough to also parse `rule_catalog.csv`'s `AND`/`≠`/`=`/`>` conditions later without a rewrite, but no rule is evaluated, no `rule_evaluations`/`findings` rows are written, and no score is computed in this phase. The `rule_catalog.csv` and `exposure_factors.csv` data is imported and validated (schema + referential integrity to question IDs) so Phase 3 can start from validated data, per FIRST_PROMPT's "CSV import/validation scripts" deliverable, which does not restrict itself to only the two CSVs needed for the questionnaire.
+Not implemented in Phase 1 or 1.1 (spec Phase 3). No rule is evaluated, no `rule_evaluations`/`findings` row is ever written, and no score is computed. `rule_catalog.csv` and `exposure_factors.csv` are imported and schema/referential-integrity validated only, so Phase 3 can start from validated data; nothing beyond validation exists for them yet, per your explicit instruction not to build `/domain/rules` or any other Rule-Engine component ahead of the phase that needs it.
 
-## 7. Document storage abstraction (no AI transmission)
+## 7. Document storage abstraction — implemented vs. still a stub
 
-- `DocumentStore` interface: `upload(assessmentId, file) -> {storagePath, sha256}`, `getSignedDownloadUrl(storagePath, ttl)`, `delete(storagePath)`.
-- Supabase Storage adapter uses a private bucket; the bucket is never public; all reads go through short-lived signed URLs generated server-side.
-- Pre-upload, the public UI shows the Hebrew redaction notice required by spec §7 before the file picker is enabled.
-- No document content, filename-derived PII, or extracted text is logged. Only `document_id`, `sha256`, `mime_type`, `size_bytes`, and `upload_status` appear in audit events.
-- `document_extractions` table and the `FactExtractor` interface are scaffolded (types + Zod schemas) but there is no code path that calls an AI provider with document content — Phase 1 acceptance criteria explicitly forbid it.
+- **Implemented, end to end**: client selects a file → Hebrew redaction notice (spec §7) → `POST /api/documents` (session-cookie-authenticated) → MIME-type/size validation → **server-side content-signature verification** (Phase 1.1 — see §11; the declared MIME type is cross-checked against the file's actual magic bytes, not trusted alone) → SHA-256 computed server-side → uploaded to a private Supabase Storage bucket → metadata row written to `documents` → audit event (metadata only, never file content).
+- **Implemented but not wired to any caller** (a stub in practice): `DocumentStore.getSignedDownloadUrl()` and `.delete()` exist and work, but no route or admin UI ever calls them — there is currently no way for an admin to view or download a document a client uploaded.
+- **Does not exist**: any AI extraction call. `document_extractions` table exists in the schema (unused) for a future phase; there is no `FactExtractor` interface or any other AI-adjacent code in this codebase.
 
 ## 8. Security baseline
 
-- `.env.example` documents required variables; `/lib/security/env.ts` validates them with Zod at process start and throws on missing/malformed values rather than falling back silently.
-- Security headers (CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) set in `next.config` / middleware.
-- `secure_token_hash` — never the raw token — is the only thing persisted; raw tokens exist only in the URL and in the response body returned once at creation time.
-- Admin routes (`/admin/**`) are gated by middleware that checks a valid Supabase session and redirects to `/admin/login` otherwise.
-- Secrets are read only from environment variables server-side; nothing under `/lib/db` or the service-role key is imported into any client component.
-- Synthetic data only — no fixture contains real personal data. Fixtures for the four scenarios in spec §22 (A–D) are added as seed/test data, all synthetic.
+- `.env.example` documents required variables; `lib/security/env.ts` validates them with Zod at process start and throws on missing/malformed values rather than falling back silently.
+- Security headers (CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) set in `next.config.ts` / `proxy.ts` (Next.js 16 renamed the `middleware.ts` convention to `proxy.ts` mid-build; functionally the same edge-interception mechanism).
+- Neither the assessment token nor the session token is ever persisted in raw form — only `HMAC-SHA256` digests, keyed by a server-side pepper (`ASSESSMENT_TOKEN_PEPPER`).
+- Admin routes (`/admin/**`) are gated by `proxy.ts`, which checks a valid Supabase session and redirects to `/admin/login` otherwise.
+- Secrets are read only from environment variables server-side; nothing under `lib/db` or the service-role key is imported into any client component.
+- Synthetic data only — no fixture contains real personal data.
 
 ## 9. CSV import/validation scripts
 
-`/scripts/import-csv.ts` (run via `tsx`) for each of the 7 files:
+`scripts/import-csv.ts` (run via `tsx`, and automatically as a `pre*` hook before `dev`/`build`/`typecheck`/`test`) for each of the 7 files:
 1. Parses with a strict Zod row schema matching each CSV's actual header labels (Hebrew headers, preserved verbatim).
-2. Validates uniqueness of the ID column (`ID` for questionnaire, `Rule ID` for rule_catalog, `ID` for document_analysis_matrix).
-3. Cross-reference checks:
-   - Every question ID referenced inside a rule's "קלטים" (inputs) column or a trigger's "מתי מוצג" column exists in `questionnaire.csv`.
-   - Every `document_analysis_matrix.csv` "שאלות מקושרות" (linked questions) reference resolves to a real question ID.
-   - Every branching trigger parses under the grammar in §5, or is explicitly reported (not silently dropped) if it doesn't.
-4. Writes validated JSON snapshots the app loads at build/boot time (`/data/generated/*.json`, gitignored, regenerated by the script) — the running app never re-parses raw CSV at request time.
-5. A `--write-db` flag additionally upserts the same data into Postgres via the service-role Supabase client, for admin-side reference (e.g. displaying legal sources); this is optional and not required for the questionnaire UI to function, since Phase 1 has no live Supabase project connected in this build environment.
+2. Validates uniqueness of the ID column.
+3. Cross-reference checks (every rule input / trigger / linked-question reference resolves to a real ID; every branching trigger parses under the grammar in §5, or is explicitly reported, never silently dropped).
+4. Writes validated JSON snapshots the app loads at build/boot time (`data/generated/*.json`, gitignored, regenerated by the script) — the running app never re-parses raw CSV at request time.
+
+**There is no `--write-db` flag or any other code path that writes CSV data into Postgres.** An earlier version of this document described one; it was never built, and per your explicit instruction it should not be added now just because it was once planned — it isn't needed by anything in Phase 1 or 1.1.
 
 The same validation logic (schema + referential integrity) is unit tested directly against the real `data/*.csv` files, so the tests double as a live-data integrity check.
 
-## 10. What is explicitly out of scope for Phase 1
+## 10. Real Supabase verification — status
 
-Per FIRST_PROMPT_FOR_CLAUDE_CODE.md: everything after the listed Phase 1 items — autosave/save-and-return wiring beyond a basic implementation, full submission + admin viewer, Rule Engine evaluation, AI document extraction, cross-checks, lawyer review screen, PDF report generation, E2E tests. These map to spec Phases 2–7 and are intentionally not built now.
+No live Supabase project is reachable from this build/development environment: the Docker daemon needed to run `supabase start` (a local Supabase stack) is not running here, and there is no network egress to supabase.com or any external Supabase project. Migrations were checked against a plain local PostgreSQL 16 instance (available in this sandbox, used and then torn down within this session — nothing from it is committed) with a minimal hand-written stand-in for Supabase's `auth.users`/`auth.uid()`/`storage.buckets`. This confirmed not just that the SQL applies cleanly, but that the RLS policies' actual allow/deny behavior is correct: a non-admin role was blocked from reading/writing, then a role matching a real `admin_profiles` row could read/write, then a non-matching id was blocked again. This is **not** equivalent to real Supabase integration testing (no real GoTrue-issued JWTs, no PostgREST enforcing RLS as the `anon`/`authenticated` roles actually would, no Storage bucket policy enforcement, no end-to-end HTTP test of the app itself). See `OPEN_QUESTIONS.md` item 8 for exact setup steps to complete real verification.
+
+## 11. Phase 1.1 hardening (this revision)
+
+Applied after Phase 1 review, per approved decisions:
+
+- **Token-exchange session flow** (§4): the raw assessment token is now used exactly once, to mint a short-lived session carried in an `HttpOnly`/`Secure`/`SameSite=Lax` cookie. It no longer remains in the browser URL, browser history, or gets resent on every questionnaire/API request. New `assessment_sessions` table (migration `20260830000002`), new `domain/assessment/session.ts`, new `app/(public)/assessment/[token]/route.ts` (replacing what was previously a page at that path).
+- **Server-side file-type verification** (§7): `lib/security/fileSignature.ts` sniffs actual file content (magic bytes for PDF/PNG/JPEG/ZIP-based DOCX-XLSX, a not-binary heuristic for CSV) and `lib/storage/validation.ts` rejects any upload whose declared MIME type doesn't match its real content — closing the "rename malware.exe to report.pdf" gap where only the browser-supplied MIME type was checked before. Known limitation: DOCX and XLSX are both ZIP containers and are only verified as "a real ZIP", not distinguished from each other or from an arbitrary renamed ZIP — see `OPEN_QUESTIONS.md`.
+- **`safeCompareHash` removed** from `lib/security/token.ts`: it had no call site (every hash lookup goes through an indexed database equality query or, in tests, a `Map`/array lookup — neither is a meaningful timing side-channel vector in this architecture), so per your instruction it was removed rather than wired in without a real justification.
+- **`retention_days = null`** is now explicitly documented (in `lib/db/types.ts` and the migration comment) as "not yet configured," not "retain indefinitely." No behavior changed — there was and is no automatic deletion job — only the meaning of the null value was clarified, since the two are easy to conflate and the distinction matters for a future retention-enforcement feature.
+- **Integration-level tests** added for the actual `app/api/assessments/answers/route.ts` and `app/api/documents/route.ts` handlers (not reimplementations), covering missing/forged/expired session rejection, cross-assessment isolation, and rejection of a client-supplied `assessmentId` in a request body.
+- **Renamed** `generateAssessmentToken`/`hashAssessmentToken` in `lib/security/token.ts` to `generateSecureToken`/`hashSecureToken`, since the same primitive is now used for two credential types (assessment tokens and session tokens); keeping the old, narrower names would itself have become the kind of misleading-naming issue this hardening pass was meant to fix.

@@ -5,11 +5,9 @@ import { useState } from "react";
 type UploadStatus = "idle" | "uploading" | "success" | "error";
 
 export function DocumentUpload({
-  token,
   documentType,
   label,
 }: {
-  token: string;
   documentType: string;
   label: string;
 }) {
@@ -23,12 +21,17 @@ export function DocumentUpload({
     setMessage(null);
 
     const formData = new FormData();
-    formData.append("token", token);
     formData.append("documentType", documentType);
     formData.append("file", file);
 
     try {
-      const res = await fetch("/api/documents", { method: "POST", body: formData });
+      // No token in the body — identity comes from the HttpOnly session
+      // cookie, sent automatically with this same-origin request.
+      const res = await fetch("/api/documents", {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData,
+      });
       const body = await res.json();
       if (!res.ok) {
         setStatus("error");

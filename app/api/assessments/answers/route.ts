@@ -1,33 +1,36 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getRepositories } from "@/lib/db";
-import { getAnswersForToken, submitAnswerForToken } from "@/domain/assessment/service";
+import { getAnswersForSession, submitAnswerForSession } from "@/domain/assessment/session";
+import { ASSESSMENT_SESSION_COOKIE } from "@/lib/security/sessionCookie";
 
 /**
- * Token-scoped answers endpoint for the public questionnaire (spec §2.1:
- * "a client may access only her assessment"). Neither handler accepts an
- * assessmentId from the caller — only a token, verified server-side, which
- * domain/assessment/service.ts resolves to the one assessment it belongs
- * to. This is the structural guarantee tested in
- * tests/token-isolation.test.ts.
- *
- * The token travels in a header on GET and in the JSON body on POST rather
- * than the query string/URL, so it does not end up in ordinary access
- * logs the way a URL-embedded token would.
+ * Session-scoped answers endpoint for the public questionnaire (spec
+ * §2.1: "a client may access only her assessment"). Phase 1.1 hardening:
+ * identity comes only from the HttpOnly `assessment_session` cookie
+ * (never from a client-supplied token or assessmentId in the request) —
+ * see domain/assessment/session.ts, the actual isolation boundary this
+ * resolves through, and tests/session-isolation.test.ts / the
+ * tests/api-*.integration.test.ts files, which exercise these exact
+ * handlers.
  */
 
 function errorStatus(error: "not_found" | "expired"): number {
   return error === "not_found" ? 404 : 410;
 }
 
+function readSessionToken(request: NextRequest): string | null {
+  return request.cookies.get(ASSESSMENT_SESSION_COOKIE)?.value ?? null;
+}
+
 export async function GET(request: NextRequest) {
-  const token = request.headers.get("x-assessment-token");
-  if (!token) {
-    return NextResponse.json({ error: "missing_token" }, { status: 400 });
+  const sessionToken = readSessionToken(request);
+  if (!sessionToken) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
   const repos = getRepositories();
-  const result = await getAnswersForToken(repos, token);
+  const result = await getAnswersForSession(repos, sessionToken);
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: errorStatus(result.error) });
   }
@@ -36,12 +39,16 @@ export async function GET(request: NextRequest) {
 }
 
 const submitAnswerSchema = z.object({
-  token: z.string().min(1),
   questionId: z.string().min(1),
   value: z.unknown(),
 });
 
 export async function POST(request: NextRequest) {
+  const sessionToken = readSessionToken(request);
+  if (!sessionToken) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
   const body = await request.json().catch(() => null);
   const parsed = submitAnswerSchema.safeParse(body);
   if (!parsed.success) {
@@ -49,9 +56,9 @@ export async function POST(request: NextRequest) {
   }
 
   const repos = getRepositories();
-  const result = await submitAnswerForToken(
+  const result = await submitAnswerForSession(
     repos,
-    parsed.data.token,
+    sessionToken,
     parsed.data.questionId,
     parsed.data.value,
   );
