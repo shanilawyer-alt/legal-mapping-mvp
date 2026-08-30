@@ -1,0 +1,173 @@
+import { randomUUID } from "node:crypto";
+import type {
+  Answer,
+  AnswerSource,
+  Assessment,
+  AssessmentStatus,
+  AuditEventInput,
+  DocumentRecord,
+  NewDocumentInput,
+  NewOrganizationInput,
+  Organization,
+} from "@/lib/db/types";
+import type {
+  AnswerRepository,
+  AssessmentRepository,
+  AuditRepository,
+  CreateAssessmentInput,
+  DocumentRepository,
+  OrganizationRepository,
+  Repositories,
+} from "@/lib/db/repositories";
+
+/**
+ * In-memory implementation of every repository port, used by unit tests
+ * (see tests/token-isolation.test.ts). Behaves like the real adapter for
+ * the invariants tests care about: unique secure_token_hash, answers
+ * scoped strictly by assessment_id, no cross-assessment leakage.
+ */
+export function createInMemoryRepositories(): Repositories {
+  const organizations = new Map<string, Organization>();
+  const assessments = new Map<string, Assessment>();
+  const answersByAssessment = new Map<string, Map<string, Answer>>();
+  const documents = new Map<string, DocumentRecord>();
+  const auditLog: AuditEventInput[] = [];
+
+  const organizationRepo: OrganizationRepository = {
+    async create(input: NewOrganizationInput): Promise<Organization> {
+      const now = new Date().toISOString();
+      const org: Organization = {
+        id: randomUUID(),
+        legalName: input.legalName,
+        businessType: input.businessType ?? null,
+        industry: input.industry ?? null,
+        branchCount: input.branchCount ?? null,
+        currentEmployeeCount: input.currentEmployeeCount ?? null,
+        formerEmployeeCount12m: input.formerEmployeeCount12m ?? null,
+        freelancerCount: input.freelancerCount ?? null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      organizations.set(org.id, org);
+      return org;
+    },
+    async getById(id: string): Promise<Organization | null> {
+      return organizations.get(id) ?? null;
+    },
+  };
+
+  const assessmentRepo: AssessmentRepository = {
+    async create(input: CreateAssessmentInput): Promise<Assessment> {
+      const existing = [...assessments.values()].find(
+        (a) => a.secureTokenHash === input.secureTokenHash,
+      );
+      if (existing) {
+        throw new Error("secure_token_hash must be unique");
+      }
+      const now = new Date().toISOString();
+      const assessment: Assessment = {
+        id: randomUUID(),
+        organizationId: input.organizationId,
+        status: "DRAFT",
+        assessmentVersion: input.assessmentVersion,
+        questionnaireVersion: input.questionnaireVersion,
+        ruleEngineVersion: input.ruleEngineVersion,
+        secureTokenHash: input.secureTokenHash,
+        tokenExpiresAt: input.tokenExpiresAt.toISOString(),
+        submittedAt: null,
+        approvedAt: null,
+        approvedBy: null,
+        retentionDays: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      assessments.set(assessment.id, assessment);
+      answersByAssessment.set(assessment.id, new Map());
+      return assessment;
+    },
+    async findByTokenHash(secureTokenHash: string): Promise<Assessment | null> {
+      return (
+        [...assessments.values()].find((a) => a.secureTokenHash === secureTokenHash) ?? null
+      );
+    },
+    async getById(id: string): Promise<Assessment | null> {
+      return assessments.get(id) ?? null;
+    },
+    async updateStatus(id: string, status: AssessmentStatus): Promise<void> {
+      const assessment = assessments.get(id);
+      if (!assessment) throw new Error(`Assessment ${id} not found`);
+      assessments.set(id, { ...assessment, status, updatedAt: new Date().toISOString() });
+    },
+  };
+
+  const answerRepo: AnswerRepository = {
+    async upsert(
+      assessmentId: string,
+      questionId: string,
+      valueJson: unknown,
+      source: AnswerSource,
+    ): Promise<Answer> {
+      const bucket = answersByAssessment.get(assessmentId);
+      if (!bucket) throw new Error(`Assessment ${assessmentId} not found`);
+      const answer: Answer = {
+        id: bucket.get(questionId)?.id ?? randomUUID(),
+        assessmentId,
+        questionId,
+        valueJson,
+        source,
+        answeredAt: new Date().toISOString(),
+      };
+      bucket.set(questionId, answer);
+      return answer;
+    },
+    async listByAssessment(assessmentId: string): Promise<Answer[]> {
+      const bucket = answersByAssessment.get(assessmentId);
+      return bucket ? [...bucket.values()] : [];
+    },
+  };
+
+  const auditRepo: AuditRepository = {
+    async record(event: AuditEventInput): Promise<void> {
+      auditLog.push(event);
+    },
+  };
+
+  const documentRepo: DocumentRepository = {
+    async create(input: NewDocumentInput): Promise<DocumentRecord> {
+      const record: DocumentRecord = {
+        id: randomUUID(),
+        assessmentId: input.assessmentId,
+        documentType: input.documentType,
+        storagePath: input.storagePath,
+        originalFilename: input.originalFilename,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes,
+        sha256: input.sha256,
+        uploadStatus: input.uploadStatus,
+        uploadedAt: new Date().toISOString(),
+        deletedAt: null,
+      };
+      documents.set(record.id, record);
+      return record;
+    },
+    async listByAssessment(assessmentId: string): Promise<DocumentRecord[]> {
+      return [...documents.values()].filter((d) => d.assessmentId === assessmentId);
+    },
+    async getById(id: string): Promise<DocumentRecord | null> {
+      return documents.get(id) ?? null;
+    },
+    async markDeleted(id: string): Promise<void> {
+      const doc = documents.get(id);
+      if (!doc) throw new Error(`Document ${id} not found`);
+      documents.set(id, { ...doc, uploadStatus: "deleted", deletedAt: new Date().toISOString() });
+    },
+  };
+
+  return {
+    organizations: organizationRepo,
+    assessments: assessmentRepo,
+    answers: answerRepo,
+    audit: auditRepo,
+    documents: documentRepo,
+  };
+}

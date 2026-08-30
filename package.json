@@ -1,0 +1,41 @@
+{
+  "name": "legal-mapping-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "tsx scripts/import-csv.ts",
+    "dev": "next dev",
+    "prebuild": "tsx scripts/import-csv.ts",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "pretypecheck": "tsx scripts/import-csv.ts",
+    "typecheck": "tsc --noEmit",
+    "import:csv": "tsx scripts/import-csv.ts",
+    "pretest": "tsx scripts/import-csv.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.112.4",
+    "csv-parse": "^7.0.2",
+    "next": "16.3.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.11",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.3",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
+  }
+}
