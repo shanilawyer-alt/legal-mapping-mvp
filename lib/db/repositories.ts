@@ -58,6 +58,8 @@ export interface AssessmentRepository {
   markSubmitted(id: string, submittedAt: Date): Promise<Assessment>;
   /** Phase 2: SUBMITTED -> DRAFT, clears submitted_at. See OPEN_QUESTIONS.md #16 for scope. */
   reopen(id: string): Promise<Assessment>;
+  /** Phase 3: LAWYER_REVIEW -> APPROVED, sets approved_at/approved_by. The unresolved-CRITICAL-findings gate is enforced by the caller (domain/review/approveAssessment.ts), not here. */
+  approve(id: string, approvedBy: string, approvedAt: Date): Promise<Assessment>;
 }
 
 export interface AnswerRepository {

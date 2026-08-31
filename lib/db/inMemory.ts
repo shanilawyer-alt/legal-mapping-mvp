@@ -151,6 +151,19 @@ export function createInMemoryRepositories(): Repositories {
       assessments.set(id, updated);
       return updated;
     },
+    async approve(id: string, approvedBy: string, approvedAt: Date): Promise<Assessment> {
+      const assessment = assessments.get(id);
+      if (!assessment) throw new Error(`Assessment ${id} not found`);
+      const updated: Assessment = {
+        ...assessment,
+        status: "APPROVED",
+        approvedAt: approvedAt.toISOString(),
+        approvedBy,
+        updatedAt: new Date().toISOString(),
+      };
+      assessments.set(id, updated);
+      return updated;
+    },
   };
 
   const answerRepo: AnswerRepository = {

@@ -139,6 +139,16 @@ export function createSupabaseRepositories(client: SupabaseClient): Repositories
       if (error) throw error;
       return mapAssessment(data);
     },
+    async approve(id: string, approvedBy: string, approvedAt: Date): Promise<Assessment> {
+      const { data, error } = await client
+        .from("assessments")
+        .update({ status: "APPROVED", approved_at: approvedAt.toISOString(), approved_by: approvedBy })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return mapAssessment(data);
+    },
   };
 
   const answers: AnswerRepository = {
