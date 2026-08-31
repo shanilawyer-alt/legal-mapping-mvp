@@ -21,23 +21,56 @@ Supabase is the database and storage service this app runs on. You need one Supa
 **PASS**: you land on a page with a left sidebar showing icons for Table Editor, SQL Editor, Database, Authentication, Storage, etc.
 **STOP if**: you don't see this project in the list at all — you need to be added to the Supabase organization first. Ask whoever manages your organization's Supabase account.
 
-### A2. Confirm the database structure is up to date ("apply migrations")
+### A2. Apply the 4 migrations (first time only, on an empty project)
 
-This app needs 4 specific pieces of database setup ("migrations"), applied in order. Someone with developer access may have already done this when the app was deployed — check first before redoing anything.
+This app needs 4 specific pieces of database setup ("migrations"), applied **in order**, exactly once. If Table Editor already shows tables (see A3), someone has already done this — skip to A3 to confirm.
 
-1. In the left sidebar, click **Table Editor**.
-2. Look for these table names in the list: `organizations`, `assessments`, `answers`, `documents`, `document_extractions`, `derived_facts`, `rule_evaluations`, `findings`, `reports`, `audit_events`, `assessment_sessions`, `admin_profiles`.
+**Recommended method: Supabase CLI, `supabase db push`.** This applies the existing migration files directly, in their filename order, with no editing, and it tracks exactly which of the 4 have been applied — so if anything interrupts it partway, re-running it picks up safely from where it stopped rather than re-applying or skipping anything.
 
-**PASS**: all of the above table names are present.
-**STOP if**: the table list is empty, or several of these names are missing. The migrations have not been applied. Ask a developer to run them (they are plain SQL files in the app's codebase, folder `supabase/migrations/`, meant to be applied in filename order — this step requires developer tooling and is not something to attempt by pasting SQL manually without technical help, since a mistake here can corrupt the database).
+You need: a computer with a terminal, a local copy of this repository (`git clone` it, or use one you already have), and two pieces of information from the Supabase dashboard — neither is a password, and you'll never paste either into a chat with an AI assistant:
+- Your project's **Reference ID**: **Project Settings → General**, field "Reference ID" (a short string like `abcdefghijklmnop`).
+- Your project's **database password**: set when the project was created. If you don't have it, reset it at **Project Settings → Database → Reset database password** — you'll type the new one directly into your terminal in step 4 below, never here.
 
-### A3. Verify the relevant tables exist (detail check)
+Steps (run each command exactly as shown, one at a time, in the terminal, from inside the cloned repository folder):
 
-1. Still in **Table Editor**, click on `rule_evaluations`.
-2. **PASS**: the table opens and shows columns including `assessment_id`, `rule_id`, `risk_score`, `risk_level`.
-3. Repeat for `findings` (expect columns including `status`, `visible_to_client`, `severity_override`) and `reports` (expect columns including `report_type`, `version`, `storage_path`).
+1. **Install the CLI.** If you already have Node.js installed (likely, since this is a Node/Next.js project), the simplest option needs no separate install:
+   ```
+   npx supabase --version
+   ```
+   This should print a version number (it downloads the CLI on first use). If you'd rather install it permanently: macOS — `brew install supabase/tap/supabase`; Windows — `scoop install supabase`. Everywhere below, use `npx supabase ...` if you used the `npx` option, or plain `supabase ...` if you installed it.
 
-**STOP if**: any of these three tables is missing or looks structurally different (missing columns) — this means the migrations are incomplete or out of date. Do not proceed; get developer help.
+2. **Sign in:**
+   ```
+   npx supabase login
+   ```
+   This opens a browser window — sign in with your Supabase account there. Nothing to type back into the terminal.
+
+3. **Link this repository to your project:**
+   ```
+   npx supabase link --project-ref YOUR-REFERENCE-ID
+   ```
+   Replace `YOUR-REFERENCE-ID` with the value from A2's intro above. If it asks for the database password, paste/type it now (locally, in your own terminal — this never goes anywhere near this chat). If it says no Supabase project structure was found, run `npx supabase init` first (safe — it will not touch or overwrite the existing `supabase/migrations/` folder) and then repeat this `link` command.
+
+4. **Apply the migrations:**
+   ```
+   npx supabase db push
+   ```
+   It will list the 4 migration files it's about to apply (in order:
+   `20260830000000_init_schema.sql`, `20260830000001_documents_storage_bucket.sql`, `20260830000002_assessment_sessions.sql`, `20260830000003_assessment_status_submitted.sql`) and ask for confirmation — review the list, then confirm.
+
+**PASS**: the terminal shows all 4 migrations applied with no error, ending in something like "Finished supabase db push."
+**STOP if**: it reports an error partway through. **Do not re-run blindly and do not try to fix it by editing the SQL yourself.** Copy the exact error text and get developer help — re-running `supabase db push` again is safe (it will only retry what didn't finish), but the underlying cause should be understood first if the error wasn't a simple network hiccup.
+
+**Alternative: Supabase's GitHub integration** (point-and-click only, no terminal) is a real Supabase feature that can auto-apply migrations on a push to this repository, but setting it up needs a small `supabase/config.toml` file added to the repository first (this repo doesn't have one yet — ask your developer/this session to add it if you want to go this route) and granting Supabase's GitHub App access to the repository — itself an access decision worth a moment's thought for a repo handling client data, and its exact dashboard screens aren't something confirmed against this specific project's current UI. The CLI method above is the one actually verified against this repository's real migration files and is recommended as the primary path; treat this alternative as something to set up deliberately with developer help, not a quick substitute.
+
+### A3. Verify all 4 migrations succeeded
+
+1. In the left sidebar, click **Database**, then the **Migrations** tab.
+2. **PASS**: exactly 4 entries are listed, named `20260830000000_init_schema`, `20260830000001_documents_storage_bucket`, `20260830000002_assessment_sessions`, `20260830000003_assessment_status_submitted`.
+3. Separately, click **Table Editor** and confirm these table names are present: `organizations`, `assessments`, `answers`, `documents`, `document_extractions`, `derived_facts`, `rule_evaluations`, `findings`, `reports`, `audit_events`, `assessment_sessions`, `admin_profiles`.
+4. Open `rule_evaluations` and confirm its columns include `assessment_id`, `rule_id`, `risk_score`, `risk_level`. Repeat for `findings` (expect `status`, `visible_to_client`, `severity_override`) and `reports` (expect `report_type`, `version`, `storage_path`).
+
+**STOP if**: the Migrations tab shows fewer than 4 entries, any expected table is missing, or a table's columns look structurally different from what's listed above — the migrations are incomplete or out of date. Do not proceed; re-run `supabase db push` (A2) or get developer help.
 
 ### A4. Confirm Row Level Security (RLS) is enabled
 
