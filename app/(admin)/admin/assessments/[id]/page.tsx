@@ -5,7 +5,7 @@ import { loadQuestionnaire, groupByDomain } from "@/domain/questionnaire/load";
 import { computeEffectiveAnswers } from "@/domain/questionnaire/effective";
 import type { AnswerValue } from "@/domain/branching/evaluate";
 import { ASSESSMENT_STATUS_LABELS } from "@/domain/admin/statusLabels";
-import { reopenAssessmentAction, deleteDocumentAction } from "@/app/(admin)/admin/assessments/[id]/actions";
+import { deleteDocumentAction } from "@/app/(admin)/admin/assessments/[id]/actions";
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 
 /**
@@ -14,11 +14,16 @@ import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
  * uploaded documents (view/download only via the short-lived-signed-URL
  * route, delete audited — item 6/17), and the activity/audit trail.
  * Deliberately no legal-findings section — that is Phase 3.
+ *
+ * Deliberately no reopen action here either. See OPEN_QUESTIONS.md item
+ * 16 — reopen is policy-sensitive (who may do it, whether it should be
+ * unconditional, what happens to existing findings/reports) and the
+ * source spec did not settle that explicitly, so it is not exposed in
+ * this or any other application flow until approved.
  */
 
 const ERROR_MESSAGES: Record<string, string> = {
   not_found: "המיפוי לא נמצא.",
-  not_reopenable: 'ניתן לפתוח מחדש רק מיפוי שנמצא במצב "נשלח — ממתין לניתוח".',
   document_not_found: "המסמך לא נמצא.",
 };
 
@@ -79,31 +84,18 @@ export default async function AdminAssessmentDetailPage({
   const statusByQuestionId = new Map(statuses.map((s) => [s.questionId, s]));
   const sections = groupByDomain(items);
 
-  const canReopen = assessment.status === "SUBMITTED";
   const employeeCount = effectiveAnswers["GEN-04"];
   const freelancerCount = effectiveAnswers["GEN-06"];
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <Link href="/admin" className="text-sm text-slate-500 underline hover:no-underline">
-            ← חזרה ללוח הבקרה
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">
-            {organization?.legalName ?? "—"}
-          </h1>
-        </div>
-        {canReopen ? (
-          <form action={reopenAssessmentAction.bind(null, assessment.id)}>
-            <ConfirmSubmitButton
-              confirmMessage="לפתוח מחדש את המיפוי לעריכה על ידי הלקוח? הפעולה תתועד ביומן הפעילות."
-              className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100"
-            >
-              פתיחה מחדש לעריכה
-            </ConfirmSubmitButton>
-          </form>
-        ) : null}
+      <div>
+        <Link href="/admin" className="text-sm text-slate-500 underline hover:no-underline">
+          ← חזרה ללוח הבקרה
+        </Link>
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+          {organization?.legalName ?? "—"}
+        </h1>
       </div>
 
       {error ? (
