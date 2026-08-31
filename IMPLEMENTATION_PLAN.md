@@ -8,6 +8,13 @@
 > something was aspirational and never implemented, it has been removed
 > rather than left to mislead a future reader. Section 11 documents the
 > Phase 1.1 hardening changes.
+>
+> **Revision note (Phase 2)**: Section 3's repository layout and the "what
+> does not exist" paragraph are updated again below — the admin assessment
+> detail view and the submit API route this document previously listed as
+> not built now exist. Section 12 documents everything Phase 2 added. The
+> Rule Engine/AI/findings items are still correctly listed as not built —
+> Phase 2 was scoped to the client pilot flow only, per your instruction.
 
 ## 1. Source data summary
 
@@ -43,37 +50,42 @@ Verification performed: row counts match the workbook's own summary tab; all 42 
 - **AI**: no AI provider integration exists anywhere in this codebase. No document content or extracted text is sent anywhere. This is not an abstraction waiting to be wired up — nothing AI-related has been built yet, deliberately (spec Phase 4).
 - **Testing**: Vitest. Unit tests cover CSV validation, the branching parser/evaluator, token/session generation and isolation, file-signature sniffing, and document-upload validation. Integration-level tests exercise the actual public API route handlers (`tests/api-*.integration.test.ts`) with `lib/db`/`lib/storage` mocked to in-memory implementations — no live Supabase project is reachable from this build environment (§10).
 
-### Actual repository layout (as built)
+### Actual repository layout (as built, through Phase 2)
 
 ```
 /app
-  /(public)/assessment/page.tsx            questionnaire UI — reads the session cookie, no token in its URL
-  /(public)/assessment/assessment-shell.tsx  client-side form/autosave/branching
+  /(public)/assessment/page.tsx            questionnaire UI — reads the session cookie, no token in its URL; renders the locked/submitted view server-side for a non-DRAFT assessment (Phase 2)
+  /(public)/assessment/assessment-shell.tsx  client-side form/autosave/branching/review-screen/submit/locked-and-expired notices (Phase 2)
   /(public)/assessment/[token]/route.ts    token-exchange endpoint only (Phase 1.1) — GET, sets the session cookie, redirects
-  /(admin)/admin                           admin dashboard (auth-gated), create-assessment form
+  /(admin)/admin                           admin dashboard (auth-gated): create-assessment form + full assessment list (Phase 2)
   /(admin)/admin/login
-  /api/assessments/answers                 session-scoped answer read/write
+  /(admin)/admin/assessments/[id]          admin assessment detail: profile/answers/documents/audit sections, reopen action (Phase 2)
+  /(admin)/admin/documents/[id]/download   admin-only: issues a fresh signed URL and redirects (Phase 2)
+  /api/assessments/answers                 session-scoped answer read/write, server-side value validation (Phase 2)
+  /api/assessments/submit                  session-scoped final submission (Phase 2)
   /api/documents                           session-scoped document upload
 /components
-  /assessment    question-field, document-upload, access-error
+  /assessment    question-field, document-upload, access-error, submitted-view (Phase 2)
+  /admin         confirm-submit-button (Phase 2)
 /domain
-  /questionnaire   loading, typing, section grouping (data/generated/questionnaire.json, built from questionnaire.csv)
+  /questionnaire   loading, typing, section grouping; effective.ts (stale-answer policy, Phase 2); validate.ts (answer-value validation, Phase 2)
   /branching       condition parser + evaluator (no eval()) — questionnaire trigger logic only
   /csv             Zod row schemas + generic CSV parser + referential-integrity checks, for all 7 CSVs
-  /assessment      assessment-token issuance/resolution (service.ts) + session issuance/resolution (session.ts, Phase 1.1)
-  /documents       upload orchestration (validation, hashing, storage call, audit)
+  /assessment      assessment-token issuance/resolution (service.ts) + session issuance/resolution (session.ts) + submission.ts (submit/reopen, Phase 2)
+  /documents       upload orchestration (validation, hashing, storage call, audit) + admin delete/signed-URL-issuance (Phase 2)
+  /admin           dashboard.ts (per-assessment summary assembly), statusLabels.ts (Phase 2)
 /lib
   /db          repository interfaces (ports) + Supabase adapter + in-memory test adapter
-  /security    token/session generation+hashing, file-signature sniffing, env validation, session-cookie config
-  /storage     DocumentStore interface + Supabase Storage adapter + upload validation
-  /supabase    Supabase server client + auth middleware helpers
+  /security    token/session generation+hashing, file-signature sniffing, zipEntries.ts (ZIP central-directory reader, Phase 2), env validation, session-cookie config
+  /storage     DocumentStore interface + Supabase Storage adapter + upload validation (deep OOXML entry check, Phase 2)
+  /supabase    Supabase server client + auth middleware helpers + getAdminUserId() (Phase 2)
 /data          the 7 CSVs + reference workbook (source of truth, read-only at runtime)
 /scripts       import-and-validate CSVs (no database-writing mode exists — see §9)
 /tests         vitest unit + integration tests
 /supabase/migrations
 ```
 
-**What does not exist, despite an earlier draft of this document describing it**: `/lib/ai`, `/domain/rules`, `/lib/audit` as a standalone module (audit writing is inline via `AuditRepository` in `lib/db`), `/components/admin`, `/components/findings`, `/components/documents`, a POST `/api/assessments` REST route (assessment creation is a Next.js Server Action, `app/(admin)/admin/create-assessment-action.ts`), and `/app/(admin)/admin/assessments/[id]` (there is no per-assessment admin detail view — the admin app has a login screen and a create-assessment form, nothing else). None of these are required by Phase 1 or Phase 1.1; build them only in the phase that actually needs them, per your instruction.
+**What still does not exist**: `/lib/ai`, `/domain/rules`, `/lib/audit` as a standalone module (audit writing is inline via `AuditRepository` in `lib/db`), `/components/findings`, any legal-findings/Rule-Engine output on the admin detail page. None of these are required by Phase 2; build them only in Phase 3, per your instruction. (`/app/(admin)/admin/assessments/[id]` and a submit API route — both listed as not-yet-built in the Phase 1.1 revision of this document — now exist; see §12.)
 
 ## 4. Assessment access: token-exchange to a session (Phase 1.1)
 
@@ -110,7 +122,7 @@ Not implemented in Phase 1 or 1.1 (spec Phase 3). No rule is evaluated, no `rule
 ## 7. Document storage abstraction — implemented vs. still a stub
 
 - **Implemented, end to end**: client selects a file → Hebrew redaction notice (spec §7) → `POST /api/documents` (session-cookie-authenticated) → MIME-type/size validation → **server-side content-signature verification** (Phase 1.1 — see §11; the declared MIME type is cross-checked against the file's actual magic bytes, not trusted alone) → SHA-256 computed server-side → uploaded to a private Supabase Storage bucket → metadata row written to `documents` → audit event (metadata only, never file content).
-- **Implemented but not wired to any caller** (a stub in practice): `DocumentStore.getSignedDownloadUrl()` and `.delete()` exist and work, but no route or admin UI ever calls them — there is currently no way for an admin to view or download a document a client uploaded.
+- **`getSignedDownloadUrl()` and `.delete()`** (Phase 2): now wired into the admin UI — `app/(admin)/admin/documents/[id]/download/route.ts` issues a fresh short-lived signed URL and redirects to it (never exposing the bucket or a raw storage path to the browser); the admin detail page's document-delete action calls `.delete()` plus a DB soft-delete, both audited. See §12.
 - **Does not exist**: any AI extraction call. `document_extractions` table exists in the schema (unused) for a future phase; there is no `FactExtractor` interface or any other AI-adjacent code in this codebase.
 
 ## 8. Security baseline
@@ -148,3 +160,18 @@ Applied after Phase 1 review, per approved decisions:
 - **`retention_days = null`** is now explicitly documented (in `lib/db/types.ts` and the migration comment) as "not yet configured," not "retain indefinitely." No behavior changed — there was and is no automatic deletion job — only the meaning of the null value was clarified, since the two are easy to conflate and the distinction matters for a future retention-enforcement feature.
 - **Integration-level tests** added for the actual `app/api/assessments/answers/route.ts` and `app/api/documents/route.ts` handlers (not reimplementations), covering missing/forged/expired session rejection, cross-assessment isolation, and rejection of a client-supplied `assessmentId` in a request body.
 - **Renamed** `generateAssessmentToken`/`hashAssessmentToken` in `lib/security/token.ts` to `generateSecureToken`/`hashSecureToken`, since the same primitive is now used for two credential types (assessment tokens and session tokens); keeping the old, narrower names would itself have become the kind of misleading-naming issue this hardening pass was meant to fix.
+
+## 12. Phase 2 — Client Pilot Flow
+
+Scoped exactly as instructed: the complete client questionnaire/submission flow and the admin-side dashboard/detail views needed to operate it, and nothing from the Rule Engine, AI extraction, cross-check engine, findings, or report generation (all still Phase 3+, untouched). Preserved without alteration throughout: the 103 questionnaire questions, question IDs, Hebrew client wording, 42 Rule IDs, severity values, and every other `data/*.csv` file — verified via `git diff --stat -- data/` staying empty at every step.
+
+- **`assessment_status` gains `SUBMITTED`** (migration `20260830000003_assessment_status_submitted.sql`, `ALTER TYPE ... ADD VALUE ... BEFORE 'ANALYZED'`, additive only). Documented in `OPEN_QUESTIONS.md` item 11 before being implemented, per your instruction — the gap it closes (nothing to correctly transition `status` to on client submission, short of falsely claiming `ANALYZED`) is explained there. Workflow is now `DRAFT → SUBMITTED → ANALYZED → LAWYER_REVIEW → APPROVED → CLIENT_REPORT_RELEASED`.
+- **Stale-branching-answer policy** (`domain/questionnaire/effective.ts`, `computeEffectiveAnswers()`): a pure, single-forward-pass function over the questionnaire's own item order, verified programmatically to be a valid dependency order (every trigger condition in the generated 103-item questionnaire references only an earlier question ID — zero exceptions). Produces the "effective" answer set (only currently-visible questions' answers) plus a per-question stale/active/answered status. This is the one and only place "is this a stale answer" is decided, and every downstream consumer (submission validation, the admin detail view) uses it rather than re-deriving the concept. Nothing is ever deleted — stale rows remain in `answers` for audit/history (OPEN_QUESTIONS.md item 18), and are shown, marked, on the admin detail page rather than hidden.
+- **Server-side answer-value validation** (`domain/questionnaire/validate.ts`): every write to `POST /api/assessments/answers` is checked against the question's actual `answerType`/`options` from the same generated questionnaire snapshot the UI renders from — not a separately maintained list. A blank/whitespace-only text answer or an empty multi-choice selection is normalized to `null` (a policy call, documented in OPEN_QUESTIONS.md item 19) rather than stored as `""`/`[]`, so "has this been answered" stays a single unambiguous check everywhere it's asked.
+- **Submission lifecycle** (`domain/assessment/submission.ts`): `submitAssessmentForSession()` requires every currently-active **core** question to be answered (conditional questions stay optional even when visible — OPEN_QUESTIONS.md item 12), then flips the assessment to `SUBMITTED` and sets `submitted_at`. `assertAssessmentEditable()` (in `domain/assessment/session.ts`, shared by answer writes and document uploads) rejects any further client write with a `locked` error once an assessment leaves `DRAFT`. `reopenAssessment()` is scoped to `SUBMITTED → DRAFT` only (item 16) and is always audited with the acting admin's id.
+- **Deep OOXML verification** (`lib/security/zipEntries.ts`, a dependency-free ZIP central-directory reader — no decompression of any entry's content, just names): `lib/storage/validation.ts` now additionally requires `word/document.xml` for a declared DOCX and `xl/workbook.xml` for a declared XLSX, rejecting a well-formed-but-wrong or unparseable ZIP with a distinct `ooxml_mismatch` code. Closes the "arbitrary ZIP renamed to .docx" gap the Phase 1.1 signature check left open (OPEN_QUESTIONS.md item 7) — a remaining, documented limit: it checks for the one entry each format cannot function without, not the full OOXML schema.
+- **Client questionnaire UI** (`app/(public)/assessment/assessment-shell.tsx`): three phases — `form` (unchanged section-by-section flow, now with "(שדה חובה)"/"(אופציונלי)" labels driven by `isCore`), `review` (every currently-visible answer, grouped by section, with per-question edit links; blocked from submitting while any required question is unanswered, with that list shown), `confirmation` (`components/assessment/submitted-view.tsx`). A fresh page load of a non-DRAFT assessment renders the same locked/confirmation view server-side (`app/(public)/assessment/page.tsx`), so a reload — or an admin reopen — never shows a stale editable form. A `423`/`410` response from any write switches to a dedicated locked/expired notice; the expired message explicitly states saved answers are not lost and the original link can be reused (spec item 8).
+- **Admin dashboard** (`domain/admin/dashboard.ts`, wired into `app/(admin)/admin/page.tsx`): business name, status, created/last-activity dates, required-questions-answered count, employee/freelancer counts (from `GEN-04`/`GEN-06` answers, not the unused `organizations` columns — item 14), a link to each assessment's detail page.
+- **Admin assessment detail** (`app/(admin)/admin/assessments/[id]/page.tsx`): profile / questionnaire answers (stale ones marked) / documents / activity-audit-trail sections. Document view/download goes only through `app/(admin)/admin/documents/[id]/download/route.ts`, which issues a fresh 5-minute signed URL and audits the access (`document_accessed`) — the bucket is never public and no raw storage path ever reaches the browser. Document delete (`domain/documents/service.ts` `deleteDocumentAsAdmin()`) removes the storage object and soft-deletes the DB row, both audited (`document_deleted`), no undo (item 17). Reopen is a Server Action calling `reopenAssessment()`. No legal-findings section exists here — deliberately, per your instruction.
+- **Tests**: 97 new tests (86 in 9 new test files; 11 added to two existing files, `tests/api-answers.integration.test.ts` and `tests/document-validation.test.ts`), taking the suite from 92 to 189 tests across 17 files. Covers all 11 areas your instruction listed (branching/stale answers, autosave, submission, locked assessment, attorney reopen, answer validation, document list/view authorization, signed-URL authorization, DOCX-vs-arbitrary-ZIP, XLSX-vs-arbitrary-ZIP, cross-assessment admin/client isolation) — see the Phase 2 completion report for the exact file list.
+- **Manual verification**: no live Supabase project is reachable in this build environment (unchanged since Phase 1.1 — OPEN_QUESTIONS.md item 4/8). Beyond `tsc`/`eslint`/the full Vitest suite/`next build`, the new client and admin flows were driven end-to-end against a real running `next dev` server using a temporary, fully-reverted in-memory repository swap (no invented Supabase credentials used anywhere) — see OPEN_QUESTIONS.md item 20 for exactly what was and wasn't covered by that pass.

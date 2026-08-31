@@ -1,9 +1,13 @@
 export type AssessmentStatus =
   | "DRAFT"
+  | "SUBMITTED"
   | "ANALYZED"
   | "LAWYER_REVIEW"
   | "APPROVED"
   | "CLIENT_REPORT_RELEASED";
+
+/** Only DRAFT accepts client answer/document writes — see domain/assessment/session.ts. */
+export const EDITABLE_ASSESSMENT_STATUSES: readonly AssessmentStatus[] = ["DRAFT"];
 
 export type AnswerSource = "client" | "attorney" | "derived";
 
@@ -116,4 +120,15 @@ export interface AuditEventInput {
   assessmentId?: string | null;
   eventType: string;
   metadata?: Record<string, unknown>;
+}
+
+/** A persisted audit_events row (Phase 2: read side, for the admin audit-trail tab). */
+export interface AuditEvent {
+  id: string;
+  actorType: "admin" | "client" | "system";
+  actorId: string | null;
+  assessmentId: string | null;
+  eventType: string;
+  metadataJson: Record<string, unknown>;
+  createdAt: string;
 }

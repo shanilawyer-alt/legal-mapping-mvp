@@ -45,7 +45,13 @@ export async function POST(request: NextRequest) {
 
   if (!result.ok) {
     const status =
-      result.error === "not_found" ? 404 : result.error === "expired" ? 410 : 422;
+      result.error === "not_found"
+        ? 404
+        : result.error === "expired"
+          ? 410
+          : result.error === "locked"
+            ? 423
+            : 422;
     return NextResponse.json({ error: result.error, message: result.message }, { status });
   }
 

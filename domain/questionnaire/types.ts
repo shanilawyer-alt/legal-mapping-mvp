@@ -23,6 +23,15 @@ export function mapAnswerType(hebrewLabel: string): AnswerType | null {
   return ANSWER_TYPE_MAP[hebrewLabel] ?? null;
 }
 
+/**
+ * Fixed option sets for the two answer types that are not driven by the
+ * `אפשרויות / פורמט` CSV column (that column is empty for these rows).
+ * Shared by the client field component and server-side answer validation
+ * so the two never drift apart.
+ */
+export const YES_NO_OPTIONS = ["כן", "לא"] as const;
+export const YES_NO_UNKNOWN_OPTIONS = ["כן", "לא", "לא יודעת"] as const;
+
 export interface QuestionnaireItem {
   readonly id: string;
   readonly domain: string;

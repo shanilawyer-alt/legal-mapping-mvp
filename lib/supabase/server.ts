@@ -32,3 +32,18 @@ export async function createSupabaseServerClient() {
     },
   });
 }
+
+/**
+ * The current admin's Supabase Auth user id, or `null` if not signed in.
+ * `proxy.ts` already redirects an unauthenticated request away from any
+ * `/admin/*` path before this runs, but every admin write still checks
+ * this itself too (defense in depth — see OPEN_QUESTIONS.md item 15 for
+ * what this check does and does not gate).
+ */
+export async function getAdminUserId(): Promise<string | null> {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user?.id ?? null;
+}

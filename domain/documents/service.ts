@@ -6,6 +6,7 @@ import type { DocumentRecord } from "@/lib/db/types";
 import type { DocumentStore } from "@/lib/storage/types";
 import { validateDocumentUpload } from "@/lib/storage/validation";
 import {
+  assertAssessmentEditable,
   resolveAssessmentBySessionToken,
   type AssessmentAccessError,
 } from "@/domain/assessment/session";
@@ -25,7 +26,7 @@ import {
 
 export type UploadDocumentResult =
   | { ok: true; document: DocumentRecord }
-  | { ok: false; error: AssessmentAccessError | "validation"; message?: string };
+  | { ok: false; error: AssessmentAccessError | "validation" | "locked"; message?: string };
 
 export interface UploadDocumentForSessionInput {
   rawSessionToken: string;
@@ -42,6 +43,9 @@ export async function uploadDocumentForSession(
 ): Promise<UploadDocumentResult> {
   const resolved = await resolveAssessmentBySessionToken(repos, input.rawSessionToken);
   if (!resolved.ok) return resolved;
+
+  const editable = assertAssessmentEditable(resolved.assessment);
+  if (!editable.ok) return editable;
 
   const validationError = validateDocumentUpload({
     mimeType: input.mimeType,
@@ -85,4 +89,76 @@ export async function uploadDocumentForSession(
 
 function sanitizeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100);
+}
+
+export type AdminDocumentActionError = "not_found";
+
+export type DeleteDocumentAsAdminResult =
+  | { ok: true }
+  | { ok: false; error: AdminDocumentActionError };
+
+/**
+ * Admin document delete (Phase 2 spec item 6, OPEN_QUESTIONS.md item 17):
+ * removes the object from storage AND soft-deletes the DB row
+ * (`upload_status = 'deleted'`, kept for audit — never a hard delete),
+ * both audited with the admin's actor id. There is no undo.
+ */
+export async function deleteDocumentAsAdmin(
+  repos: Repositories,
+  store: DocumentStore,
+  assessmentId: string,
+  documentId: string,
+  adminActorId: string,
+): Promise<DeleteDocumentAsAdminResult> {
+  const document = await repos.documents.getById(documentId);
+  if (!document || document.assessmentId !== assessmentId) {
+    return { ok: false, error: "not_found" };
+  }
+
+  await store.delete(document.storagePath);
+  await repos.documents.markDeleted(documentId);
+
+  await repos.audit.record({
+    actorType: "admin",
+    actorId: adminActorId,
+    assessmentId,
+    eventType: "document_deleted",
+    metadata: { documentId, documentType: document.documentType },
+  });
+
+  return { ok: true };
+}
+
+export type IssueSignedDownloadUrlResult =
+  | { ok: true; url: string }
+  | { ok: false; error: AdminDocumentActionError };
+
+/**
+ * The only path to a document's actual bytes (Phase 2 spec item 6): the
+ * bucket is never public, no storage path is ever sent to the browser —
+ * this issues a fresh short-lived signed URL server-side and audits the
+ * access before handing it back.
+ */
+export async function issueSignedDownloadUrlForAdmin(
+  repos: Repositories,
+  store: DocumentStore,
+  documentId: string,
+  adminActorId: string,
+): Promise<IssueSignedDownloadUrlResult> {
+  const document = await repos.documents.getById(documentId);
+  if (!document || document.uploadStatus === "deleted") {
+    return { ok: false, error: "not_found" };
+  }
+
+  const url = await store.getSignedDownloadUrl(document.storagePath);
+
+  await repos.audit.record({
+    actorType: "admin",
+    actorId: adminActorId,
+    assessmentId: document.assessmentId,
+    eventType: "document_accessed",
+    metadata: { documentId: document.id, documentType: document.documentType },
+  });
+
+  return { ok: true, url };
 }

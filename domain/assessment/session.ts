@@ -1,8 +1,14 @@
 import "server-only";
 import type { Repositories } from "@/lib/db/repositories";
-import type { Answer, Assessment } from "@/lib/db/types";
+import { EDITABLE_ASSESSMENT_STATUSES, type Answer, type Assessment } from "@/lib/db/types";
 import { addHours, generateSecureToken, hashSecureToken, isExpired } from "@/lib/security/token";
 import { resolveAssessmentByToken, type AssessmentAccessError } from "@/domain/assessment/service";
+import { loadQuestionnaire } from "@/domain/questionnaire/load";
+import {
+  normalizeAnswerValue,
+  validateAnswerValue,
+  type AnswerValidationError,
+} from "@/domain/questionnaire/validate";
 
 export type { AssessmentAccessError };
 
@@ -93,6 +99,23 @@ export async function resolveAssessmentBySessionToken(
   return { ok: true, assessment };
 }
 
+export type EditableCheckResult = { ok: true } | { ok: false; error: "locked" };
+
+/**
+ * Only a DRAFT assessment accepts client writes (answers or documents) —
+ * see lib/db/types.ts EDITABLE_ASSESSMENT_STATUSES and OPEN_QUESTIONS.md
+ * item 11. Once submitted, the client sees a read-only confirmation view
+ * (app/(public)/assessment) until an attorney explicitly reopens it
+ * (domain/assessment/submission.ts reopenAssessment). Shared by
+ * submitAnswerForSession below and domain/documents/service.ts.
+ */
+export function assertAssessmentEditable(assessment: Assessment): EditableCheckResult {
+  if (!EDITABLE_ASSESSMENT_STATUSES.includes(assessment.status)) {
+    return { ok: false, error: "locked" };
+  }
+  return { ok: true };
+}
+
 export type AnswersResult =
   | { ok: true; answers: Answer[] }
   | { ok: false; error: AssessmentAccessError };
@@ -109,8 +132,18 @@ export async function getAnswersForSession(
 
 export type SubmitAnswerResult =
   | { ok: true; answer: Answer }
-  | { ok: false; error: AssessmentAccessError };
+  | { ok: false; error: AssessmentAccessError }
+  | { ok: false; error: "locked" }
+  | { ok: false; error: "unknown_question" }
+  | { ok: false; error: "invalid_answer"; validationError: AnswerValidationError };
 
+/**
+ * Validates a client-submitted answer against `questionnaire.csv`'s
+ * configured answer type/options (Phase 2 spec item 9) before it is ever
+ * persisted — see domain/questionnaire/validate.ts. A questionId that
+ * does not exist in the questionnaire at all is rejected outright rather
+ * than silently stored, since nothing downstream could make sense of it.
+ */
 export async function submitAnswerForSession(
   repos: Repositories,
   rawSessionToken: string,
@@ -120,10 +153,22 @@ export async function submitAnswerForSession(
   const resolved = await resolveAssessmentBySessionToken(repos, rawSessionToken);
   if (!resolved.ok) return resolved;
 
+  const editable = assertAssessmentEditable(resolved.assessment);
+  if (!editable.ok) return editable;
+
+  const item = loadQuestionnaire().find((q) => q.id === questionId);
+  if (!item) return { ok: false, error: "unknown_question" };
+
+  const normalizedValue = normalizeAnswerValue(item, valueJson);
+  const validation = validateAnswerValue(item, normalizedValue);
+  if (!validation.ok) {
+    return { ok: false, error: "invalid_answer", validationError: validation.error };
+  }
+
   const answer = await repos.answers.upsert(
     resolved.assessment.id,
     questionId,
-    valueJson,
+    normalizedValue,
     "client",
   );
 

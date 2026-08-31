@@ -4,6 +4,7 @@ import type {
   Assessment,
   AssessmentSession,
   AssessmentStatus,
+  AuditEvent,
   AuditEventInput,
   DocumentRecord,
   NewAssessmentSessionInput,
@@ -40,6 +41,12 @@ export interface AssessmentRepository {
   findByTokenHash(secureTokenHash: string): Promise<Assessment | null>;
   getById(id: string): Promise<Assessment | null>;
   updateStatus(id: string, status: AssessmentStatus): Promise<void>;
+  /** Phase 2: admin dashboard listing. */
+  listAll(): Promise<Assessment[]>;
+  /** Phase 2: DRAFT -> SUBMITTED, sets submitted_at. */
+  markSubmitted(id: string, submittedAt: Date): Promise<Assessment>;
+  /** Phase 2: SUBMITTED -> DRAFT, clears submitted_at. See OPEN_QUESTIONS.md #16 for scope. */
+  reopen(id: string): Promise<Assessment>;
 }
 
 export interface AnswerRepository {
@@ -54,6 +61,8 @@ export interface AnswerRepository {
 
 export interface AuditRepository {
   record(event: AuditEventInput): Promise<void>;
+  /** Phase 2: admin audit-trail tab. */
+  listByAssessment(assessmentId: string): Promise<AuditEvent[]>;
 }
 
 export interface DocumentRepository {

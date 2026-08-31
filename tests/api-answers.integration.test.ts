@@ -99,7 +99,9 @@ describe("GET /api/assessments/answers", () => {
     const b = await setupAssessmentWithSession("עסק ב");
 
     const { POST, GET } = await import("@/app/api/assessments/answers/route");
-    await POST(requestWithCookie("POST", a.rawSessionToken, { questionId: "GEN-01", value: "x" }));
+    await POST(
+      requestWithCookie("POST", a.rawSessionToken, { questionId: "GEN-01", value: "עוסק מורשה" }),
+    );
     await POST(requestWithCookie("POST", a.rawSessionToken, { questionId: "GEN-04", value: 5 }));
 
     const resB = await GET(requestWithCookie("GET", b.rawSessionToken));
@@ -150,5 +152,66 @@ describe("POST /api/assessments/answers", () => {
     const answersForB = await repos.answers.listByAssessment(b.assessment.id);
     expect(answersForB).toHaveLength(1);
     expect(answersForB[0].questionId).toBe("GEN-04");
+  });
+
+  it("rejects a value that isn't one of the question's configured options", async () => {
+    const { rawSessionToken } = await setupAssessmentWithSession("עסק");
+    const { POST } = await import("@/app/api/assessments/answers/route");
+    // GEN-01 (business type) is single_choice; "x" isn't a real option.
+    const res = await POST(
+      requestWithCookie("POST", rawSessionToken, { questionId: "GEN-01", value: "x" }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_answer");
+    expect(body.validationError).toBe("invalid_option");
+  });
+
+  it("rejects a value of the wrong JS type for a numeric question", async () => {
+    const { rawSessionToken } = await setupAssessmentWithSession("עסק");
+    const { POST } = await import("@/app/api/assessments/answers/route");
+    const res = await POST(
+      requestWithCookie("POST", rawSessionToken, { questionId: "GEN-04", value: "five" }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_answer");
+  });
+
+  it("rejects a questionId that doesn't exist in the questionnaire", async () => {
+    const { rawSessionToken } = await setupAssessmentWithSession("עסק");
+    const { POST } = await import("@/app/api/assessments/answers/route");
+    const res = await POST(
+      requestWithCookie("POST", rawSessionToken, { questionId: "NOT-A-REAL-QUESTION", value: "x" }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("unknown_question");
+  });
+
+  it("accepts null to clear a previously-answered question", async () => {
+    const { rawSessionToken } = await setupAssessmentWithSession("עסק");
+    const { POST, GET } = await import("@/app/api/assessments/answers/route");
+    await POST(requestWithCookie("POST", rawSessionToken, { questionId: "GEN-04", value: 5 }));
+    const clearRes = await POST(
+      requestWithCookie("POST", rawSessionToken, { questionId: "GEN-04", value: null }),
+    );
+    expect(clearRes.ok).toBe(true);
+
+    const res = await GET(requestWithCookie("GET", rawSessionToken));
+    const body = await res.json();
+    expect(body.answers[0].valueJson).toBeNull();
+  });
+
+  it("normalizes a blank text answer to null rather than storing an empty string", async () => {
+    const { rawSessionToken } = await setupAssessmentWithSession("עסק");
+    const { POST, GET } = await import("@/app/api/assessments/answers/route");
+    // GEN-02 is the free-text legal name field (short_text).
+    const res = await POST(
+      requestWithCookie("POST", rawSessionToken, { questionId: "GEN-02", value: "   " }),
+    );
+    expect(res.ok).toBe(true);
+
+    const getRes = await GET(requestWithCookie("GET", rawSessionToken));
+    const body = await getRes.json();
+    expect(body.answers[0].valueJson).toBeNull();
   });
 });

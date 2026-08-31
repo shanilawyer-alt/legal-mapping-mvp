@@ -1,6 +1,10 @@
 "use client";
 
-import type { QuestionnaireItem } from "@/domain/questionnaire/types";
+import {
+  YES_NO_OPTIONS,
+  YES_NO_UNKNOWN_OPTIONS,
+  type QuestionnaireItem,
+} from "@/domain/questionnaire/types";
 import type { AnswerValue } from "@/domain/branching/evaluate";
 
 interface QuestionFieldProps {
@@ -9,9 +13,6 @@ interface QuestionFieldProps {
   onChange: (value: AnswerValue) => void;
   onCommit?: () => void;
 }
-
-const YES_NO_OPTIONS = ["כן", "לא"];
-const YES_NO_UNKNOWN_OPTIONS = ["כן", "לא", "לא יודעת"];
 
 export function QuestionField({ item, value, onChange, onCommit }: QuestionFieldProps) {
   switch (item.answerType) {

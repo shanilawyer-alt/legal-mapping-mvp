@@ -10,14 +10,13 @@
  * dependency): checks magic-byte signatures for binary formats, and a
  * not-binary heuristic for CSV, which has no magic bytes of its own.
  *
- * Known limitation (see OPEN_QUESTIONS.md): DOCX and XLSX are both
- * ZIP-based OOXML containers with the same outer signature. This module
- * confirms the upload is a genuine ZIP archive (which already defeats the
- * "rename an arbitrary file to .docx" attack) but does not inspect the
- * ZIP's internal entries to distinguish a Word document from an Excel
- * workbook from an arbitrary ZIP file renamed to either extension. Deeper
- * OOXML content-type verification is a reasonable future hardening step,
- * not built here.
+ * DOCX and XLSX are both ZIP-based OOXML containers with the same outer
+ * signature — this module only confirms the upload is a genuine ZIP
+ * archive (which already defeats "rename an arbitrary file to .docx").
+ * Distinguishing a real Word document from an Excel workbook from an
+ * arbitrary ZIP renamed to either extension requires looking at the
+ * archive's internal entries, which lib/storage/validation.ts does via
+ * lib/security/zipEntries.ts — see OPEN_QUESTIONS.md item 7.
  */
 
 export type SniffedFileType = "pdf" | "png" | "jpeg" | "zip" | "text" | "unknown";

@@ -16,6 +16,7 @@ import type {
   Assessment,
   AssessmentSession,
   AssessmentStatus,
+  AuditEvent,
   AuditEventInput,
   DocumentRecord,
   NewAssessmentSessionInput,
@@ -94,6 +95,34 @@ export function createSupabaseRepositories(client: SupabaseClient): Repositories
       const { error } = await client.from("assessments").update({ status }).eq("id", id);
       if (error) throw error;
     },
+    async listAll(): Promise<Assessment[]> {
+      const { data, error } = await client
+        .from("assessments")
+        .select()
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map(mapAssessment);
+    },
+    async markSubmitted(id: string, submittedAt: Date): Promise<Assessment> {
+      const { data, error } = await client
+        .from("assessments")
+        .update({ status: "SUBMITTED", submitted_at: submittedAt.toISOString() })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return mapAssessment(data);
+    },
+    async reopen(id: string): Promise<Assessment> {
+      const { data, error } = await client
+        .from("assessments")
+        .update({ status: "DRAFT", submitted_at: null })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return mapAssessment(data);
+    },
   };
 
   const answers: AnswerRepository = {
@@ -140,6 +169,15 @@ export function createSupabaseRepositories(client: SupabaseClient): Repositories
         metadata_json: event.metadata ?? {},
       });
       if (error) throw error;
+    },
+    async listByAssessment(assessmentId: string): Promise<AuditEvent[]> {
+      const { data, error } = await client
+        .from("audit_events")
+        .select()
+        .eq("assessment_id", assessmentId)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map(mapAuditEvent);
     },
   };
 
@@ -290,5 +328,18 @@ function mapAnswer(row: any): Answer {
     valueJson: row.value_json,
     source: row.source,
     answeredAt: row.answered_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapAuditEvent(row: any): AuditEvent {
+  return {
+    id: row.id,
+    actorType: row.actor_type,
+    actorId: row.actor_id,
+    assessmentId: row.assessment_id,
+    eventType: row.event_type,
+    metadataJson: row.metadata_json,
+    createdAt: row.created_at,
   };
 }

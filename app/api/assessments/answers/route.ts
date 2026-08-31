@@ -63,6 +63,18 @@ export async function POST(request: NextRequest) {
     parsed.data.value,
   );
   if (!result.ok) {
+    if (result.error === "unknown_question") {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    if (result.error === "invalid_answer") {
+      return NextResponse.json(
+        { error: result.error, validationError: result.validationError },
+        { status: 400 },
+      );
+    }
+    if (result.error === "locked") {
+      return NextResponse.json({ error: result.error }, { status: 423 });
+    }
     return NextResponse.json({ error: result.error }, { status: errorStatus(result.error) });
   }
 

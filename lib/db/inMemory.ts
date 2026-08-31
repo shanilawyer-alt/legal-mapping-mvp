@@ -5,6 +5,7 @@ import type {
   Assessment,
   AssessmentSession,
   AssessmentStatus,
+  AuditEvent,
   AuditEventInput,
   DocumentRecord,
   NewAssessmentSessionInput,
@@ -35,7 +36,7 @@ export function createInMemoryRepositories(): Repositories {
   const answersByAssessment = new Map<string, Map<string, Answer>>();
   const documents = new Map<string, DocumentRecord>();
   const sessions = new Map<string, AssessmentSession>();
-  const auditLog: AuditEventInput[] = [];
+  const auditLog: AuditEvent[] = [];
 
   const organizationRepo: OrganizationRepository = {
     async create(input: NewOrganizationInput): Promise<Organization> {
@@ -102,6 +103,33 @@ export function createInMemoryRepositories(): Repositories {
       if (!assessment) throw new Error(`Assessment ${id} not found`);
       assessments.set(id, { ...assessment, status, updatedAt: new Date().toISOString() });
     },
+    async listAll(): Promise<Assessment[]> {
+      return [...assessments.values()];
+    },
+    async markSubmitted(id: string, submittedAt: Date): Promise<Assessment> {
+      const assessment = assessments.get(id);
+      if (!assessment) throw new Error(`Assessment ${id} not found`);
+      const updated: Assessment = {
+        ...assessment,
+        status: "SUBMITTED",
+        submittedAt: submittedAt.toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      assessments.set(id, updated);
+      return updated;
+    },
+    async reopen(id: string): Promise<Assessment> {
+      const assessment = assessments.get(id);
+      if (!assessment) throw new Error(`Assessment ${id} not found`);
+      const updated: Assessment = {
+        ...assessment,
+        status: "DRAFT",
+        submittedAt: null,
+        updatedAt: new Date().toISOString(),
+      };
+      assessments.set(id, updated);
+      return updated;
+    },
   };
 
   const answerRepo: AnswerRepository = {
@@ -132,7 +160,18 @@ export function createInMemoryRepositories(): Repositories {
 
   const auditRepo: AuditRepository = {
     async record(event: AuditEventInput): Promise<void> {
-      auditLog.push(event);
+      auditLog.push({
+        id: randomUUID(),
+        actorType: event.actorType,
+        actorId: event.actorId ?? null,
+        assessmentId: event.assessmentId ?? null,
+        eventType: event.eventType,
+        metadataJson: event.metadata ?? {},
+        createdAt: new Date().toISOString(),
+      });
+    },
+    async listByAssessment(assessmentId: string): Promise<AuditEvent[]> {
+      return auditLog.filter((e) => e.assessmentId === assessmentId);
     },
   };
 
