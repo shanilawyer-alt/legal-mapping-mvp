@@ -121,6 +121,12 @@ export const privacyNoticeSchema = z.object({
   rightsDescribed: bool(),
   camerasDisclosed: bool(),
   monitoringDisclosed: bool(),
+  // Distinct from monitoringDisclosed (whether the notice adequately informs
+  // employees): this records whether the document's own text reveals that
+  // location/GPS/camera monitoring means exist at all, regardless of
+  // disclosure adequacy — used to cross-check against a client's own
+  // "no monitoring" questionnaire answer.
+  monitoringMeansDescribed: str(),
   biometricsDisclosed: bool(),
   retentionPeriod: str(),
 });

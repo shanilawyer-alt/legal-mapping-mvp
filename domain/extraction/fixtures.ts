@@ -91,6 +91,12 @@ export const FIXTURE_C_DOC07 = {
   rightsDescribed: fv(false, { page: 1 }),
   camerasDisclosed: fv(false, { page: 1 }), // cameras exist per fixture, but notice omits them — the contradiction
   monitoringDisclosed: fv(false, { page: 1 }),
+  // The document's own text reveals cameras and vehicle GPS tracking exist,
+  // even though the notice fails to properly disclose them (see
+  // camerasDisclosed/monitoringDisclosed above) — this is the signal the
+  // privacy-contradiction cross-check compares against a client
+  // questionnaire answer of "no monitoring" (PRIV-19 = ["אין"]).
+  monitoringMeansDescribed: fv("מצלמות בשטח העבודה, מעקב GPS לרכבי החברה", { page: 1 }),
   biometricsDisclosed: fv(false),
   retentionPeriod: fv(null),
 };
