@@ -39,12 +39,22 @@ export type RunAnalysisResult =
  * finding/derived-fact slate for this assessment (nothing here reads or
  * merges a prior run).
  *
- * One coarse `analysis_run` audit event is recorded here, mirroring the
- * one-event-per-lifecycle-action precedent in
- * domain/assessment/submission.ts; the finer-grained per-item events
- * PHASE_3_PLAN.md §12 lists (document_extracted, fact_created,
- * rule_evaluation_run, finding_created) are wired in task #53, alongside
- * every other Phase 3 event, rather than here.
+ * One coarse `analysis_run` audit event is recorded here (task #53),
+ * mirroring the one-event-per-lifecycle-action precedent in
+ * domain/assessment/submission.ts. MASTER_BUILD_SPEC.md's own
+ * "audit_events" section names the required categories verbatim:
+ * "Audit login, link creation, document access, analysis, finding
+ * override, approval, report generation and deletion" — "analysis" is
+ * one category, not one event per document extracted / fact derived /
+ * rule evaluated / finding created. PHASE_3_PLAN.md §12's earlier,
+ * more granular event-name list (document_extracted, fact_created,
+ * rule_evaluation_run, finding_created) was this project's own draft
+ * plan, not a spec requirement — logging 40+ individual rows per
+ * analysis run would add volume and complication spec doesn't ask for,
+ * without adding traceability the `analysis_run` event's metadata
+ * (documentCount/ruleEvaluationCount/findingCount/crossCheckIssueCount)
+ * doesn't already give (every individual fact/evaluation/finding is
+ * already durably queryable by assessmentId regardless).
  */
 export async function runAnalysis(
   repos: Repositories,

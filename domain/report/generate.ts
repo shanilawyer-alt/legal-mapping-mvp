@@ -14,9 +14,13 @@ import { renderReportHtml } from "@/domain/report/render";
  * never a public URL, spec §7), and records a `reports` row. This is a
  * preview only — it never changes assessment status and never makes a
  * report client-visible; that boundary belongs to task #51's explicit
- * attorney approve/release actions. Audit logging for this action is
- * wired in task #53, alongside every other Phase 3 lifecycle action, not
- * here in isolation.
+ * attorney approve/release actions.
+ *
+ * Audits `report_generated` (task #53) — MASTER_BUILD_SPEC.md §"audit_events"
+ * lists this verbatim as one of the required coarse audit categories
+ * ("Audit login, link creation, document access, analysis, finding
+ * override, approval, report generation and deletion"). No content is
+ * logged, only which report type/version was produced and by whom.
  *
  * `freelancerScreening` is supplied by the caller (task #50's
  * orchestration) rather than recomputed here, since deriving it needs
@@ -47,5 +51,15 @@ export async function generateReportPreview(
 
   await store.upload({ storagePath, data: Buffer.from(html, "utf-8"), mimeType: "text/html" });
 
-  return repos.reports.create({ assessmentId, reportType, version, storagePath, generatedBy });
+  const report = await repos.reports.create({ assessmentId, reportType, version, storagePath, generatedBy });
+
+  await repos.audit.record({
+    actorType: generatedBy ? "admin" : "system",
+    actorId: generatedBy,
+    assessmentId,
+    eventType: "report_generated",
+    metadata: { reportId: report.id, reportType, version },
+  });
+
+  return report;
 }

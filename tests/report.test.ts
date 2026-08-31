@@ -251,6 +251,11 @@ describe("generateReportPreview", () => {
 
     const persisted = await repos.reports.listByAssessment("assessment-1");
     expect(persisted).toHaveLength(3);
+
+    const events = await repos.audit.listByAssessment("assessment-1");
+    const reportEvents = events.filter((e) => e.eventType === "report_generated");
+    expect(reportEvents).toHaveLength(3); // one per generateReportPreview call above
+    expect(reportEvents[0].metadataJson).toMatchObject({ reportType: "internal", version: 1 });
   });
 
   it("a client report generated before any attorney review shows zero findings (item 29's intentional gate)", async () => {

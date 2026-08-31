@@ -55,6 +55,7 @@ const AUDIT_EVENT_LABELS: Record<string, string> = {
   analysis_run: "ניתוח הורץ",
   finding_reviewed: "ממצא נבדק",
   assessment_approved: "המיפוי אושר",
+  report_generated: "תצוגה מקדימה של דוח נוצרה",
   report_released: "דוח נשלח ללקוח",
 };
 
