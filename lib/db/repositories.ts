@@ -6,11 +6,22 @@ import type {
   AssessmentStatus,
   AuditEvent,
   AuditEventInput,
+  DocumentExtraction,
   DocumentRecord,
+  DerivedFact,
+  Finding,
+  FindingReviewUpdate,
   NewAssessmentSessionInput,
+  NewDerivedFactInput,
+  NewDocumentExtractionInput,
   NewDocumentInput,
+  NewFindingInput,
   NewOrganizationInput,
+  NewReportInput,
+  NewRuleEvaluationInput,
   Organization,
+  Report,
+  RuleEvaluation,
 } from "@/lib/db/types";
 
 /**
@@ -77,6 +88,41 @@ export interface AssessmentSessionRepository {
   findByTokenHash(sessionTokenHash: string): Promise<AssessmentSession | null>;
 }
 
+/** Phase 3. */
+export interface DocumentExtractionRepository {
+  create(input: NewDocumentExtractionInput): Promise<DocumentExtraction>;
+  listByDocument(documentId: string): Promise<DocumentExtraction[]>;
+  listByAssessment(assessmentId: string): Promise<DocumentExtraction[]>;
+}
+
+/** Phase 3. */
+export interface DerivedFactRepository {
+  create(input: NewDerivedFactInput): Promise<DerivedFact>;
+  listByAssessment(assessmentId: string): Promise<DerivedFact[]>;
+}
+
+/** Phase 3. */
+export interface RuleEvaluationRepository {
+  create(input: NewRuleEvaluationInput): Promise<RuleEvaluation>;
+  listByAssessment(assessmentId: string): Promise<RuleEvaluation[]>;
+}
+
+/** Phase 3. */
+export interface FindingRepository {
+  create(input: NewFindingInput): Promise<Finding>;
+  listByAssessment(assessmentId: string): Promise<Finding[]>;
+  getById(id: string): Promise<Finding | null>;
+  /** Attorney review actions only — see FindingReviewUpdate. Sets reviewedBy/reviewedAt. */
+  review(id: string, update: FindingReviewUpdate, reviewedBy: string): Promise<Finding>;
+}
+
+/** Phase 3. */
+export interface ReportRepository {
+  create(input: NewReportInput): Promise<Report>;
+  listByAssessment(assessmentId: string): Promise<Report[]>;
+  getById(id: string): Promise<Report | null>;
+}
+
 export interface Repositories {
   organizations: OrganizationRepository;
   assessments: AssessmentRepository;
@@ -84,4 +130,9 @@ export interface Repositories {
   audit: AuditRepository;
   documents: DocumentRepository;
   assessmentSessions: AssessmentSessionRepository;
+  documentExtractions: DocumentExtractionRepository;
+  derivedFacts: DerivedFactRepository;
+  ruleEvaluations: RuleEvaluationRepository;
+  findings: FindingRepository;
+  reports: ReportRepository;
 }

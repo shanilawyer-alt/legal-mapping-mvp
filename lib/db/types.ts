@@ -132,3 +132,177 @@ export interface AuditEvent {
   metadataJson: Record<string, unknown>;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------
+// Phase 3: document_extractions, derived_facts, rule_evaluations,
+// findings, reports — all five tables already existed in the schema
+// since Phase 1 (MASTER_BUILD_SPEC.md §5) but were unused until now.
+// ---------------------------------------------------------------------
+
+export type ExtractionStatus = "pending" | "completed" | "failed";
+
+export interface DocumentExtraction {
+  id: string;
+  documentId: string;
+  schemaName: string;
+  schemaVersion: string;
+  provider: string;
+  model: string;
+  extractionJson: Record<string, unknown>;
+  confidenceJson: Record<string, unknown>;
+  evidenceJson: Record<string, unknown>;
+  status: ExtractionStatus;
+  createdAt: string;
+}
+
+export interface NewDocumentExtractionInput {
+  documentId: string;
+  schemaName: string;
+  schemaVersion: string;
+  provider: string;
+  model: string;
+  extractionJson: Record<string, unknown>;
+  confidenceJson: Record<string, unknown>;
+  evidenceJson: Record<string, unknown>;
+  status: ExtractionStatus;
+}
+
+/** `sourceType` matches spec §5's own examples: "answer" | "document_extraction" | "cross_check" | "system_derived". */
+export type FactSourceType = "answer" | "document_extraction" | "cross_check" | "system_derived";
+
+export interface DerivedFact {
+  id: string;
+  assessmentId: string;
+  factKey: string; // dot-namespaced, e.g. "contract.overtime.type" (spec §5 examples)
+  valueJson: unknown;
+  sourceType: FactSourceType;
+  sourceId: string | null;
+  /** 1-4, spec §12's confidence scale. Never used to increase risk. */
+  confidence: number | null;
+  createdAt: string;
+}
+
+export interface NewDerivedFactInput {
+  assessmentId: string;
+  factKey: string;
+  valueJson: unknown;
+  sourceType: FactSourceType;
+  sourceId?: string | null;
+  confidence?: number | null;
+}
+
+export type RiskLevel = "LOW" | "MEDIUM" | "SIGNIFICANT" | "HIGH" | "CRITICAL";
+
+export interface RuleEvaluation {
+  id: string;
+  assessmentId: string;
+  ruleId: string; // matches rule_catalog.csv "Rule ID" exactly, e.g. R-EMP-001
+  ruleVersion: string;
+  matched: boolean;
+  inputSnapshot: Record<string, unknown>;
+  baseSeverity: number; // 1-5
+  scopePoints: number;
+  durationPoints: number;
+  systemicPoints: number;
+  disputePoints: number;
+  overrideCritical: boolean;
+  riskScore: number; // 0-100
+  riskLevel: RiskLevel;
+  confidence: number | null;
+  createdAt: string;
+}
+
+export interface NewRuleEvaluationInput {
+  assessmentId: string;
+  ruleId: string;
+  ruleVersion: string;
+  matched: boolean;
+  inputSnapshot: Record<string, unknown>;
+  baseSeverity: number;
+  scopePoints: number;
+  durationPoints: number;
+  systemicPoints: number;
+  disputePoints: number;
+  overrideCritical: boolean;
+  riskScore: number;
+  riskLevel: RiskLevel;
+  confidence?: number | null;
+}
+
+export type FindingStatus = "draft" | "confirmed" | "modified" | "dismissed";
+
+export interface Finding {
+  id: string;
+  assessmentId: string;
+  ruleEvaluationId: string | null;
+  category: string;
+  subCategory: string | null;
+  internalTitle: string;
+  clientTitle: string | null;
+  draftInternalText: string | null;
+  draftClientText: string | null;
+  recommendedAction: string | null;
+  riskScore: number | null;
+  riskLevel: RiskLevel | null;
+  confidence: number | null;
+  status: FindingStatus;
+  visibleToClient: boolean;
+  lawyerNotes: string | null;
+  severityOverride: number | null;
+  overrideReason: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewFindingInput {
+  assessmentId: string;
+  ruleEvaluationId?: string | null;
+  category: string;
+  subCategory?: string | null;
+  internalTitle: string;
+  clientTitle?: string | null;
+  draftInternalText?: string | null;
+  draftClientText?: string | null;
+  recommendedAction?: string | null;
+  riskScore?: number | null;
+  riskLevel?: RiskLevel | null;
+  confidence?: number | null;
+}
+
+/**
+ * The mutable subset of a finding an attorney can change during review
+ * (spec §15: confirm / modify / dismiss / override severity / note /
+ * visible-to-client). `reviewedBy`/`reviewedAt` are set by the repository,
+ * not the caller. `severityOverride` requires `overrideReason` — enforced
+ * by the DB's own `override_requires_reason` check constraint, mirrored
+ * in domain/findings validation so the error surfaces before the query.
+ */
+export interface FindingReviewUpdate {
+  status?: FindingStatus;
+  visibleToClient?: boolean;
+  lawyerNotes?: string | null;
+  severityOverride?: number | null;
+  overrideReason?: string | null;
+}
+
+export type ReportType = "internal" | "client";
+
+export interface Report {
+  id: string;
+  assessmentId: string;
+  reportType: ReportType;
+  version: number;
+  storagePath: string;
+  generatedBy: string | null;
+  generatedAt: string;
+}
+
+export interface NewReportInput {
+  assessmentId: string;
+  reportType: ReportType;
+  version: number;
+  storagePath: string;
+  generatedBy?: string | null;
+}

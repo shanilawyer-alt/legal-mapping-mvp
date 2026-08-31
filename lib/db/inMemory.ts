@@ -7,11 +7,22 @@ import type {
   AssessmentStatus,
   AuditEvent,
   AuditEventInput,
+  DerivedFact,
+  DocumentExtraction,
   DocumentRecord,
+  Finding,
+  FindingReviewUpdate,
   NewAssessmentSessionInput,
+  NewDerivedFactInput,
+  NewDocumentExtractionInput,
   NewDocumentInput,
+  NewFindingInput,
   NewOrganizationInput,
+  NewReportInput,
+  NewRuleEvaluationInput,
   Organization,
+  Report,
+  RuleEvaluation,
 } from "@/lib/db/types";
 import type {
   AnswerRepository,
@@ -19,9 +30,14 @@ import type {
   AssessmentSessionRepository,
   AuditRepository,
   CreateAssessmentInput,
+  DerivedFactRepository,
+  DocumentExtractionRepository,
   DocumentRepository,
+  FindingRepository,
   OrganizationRepository,
+  ReportRepository,
   Repositories,
+  RuleEvaluationRepository,
 } from "@/lib/db/repositories";
 
 /**
@@ -37,6 +53,11 @@ export function createInMemoryRepositories(): Repositories {
   const documents = new Map<string, DocumentRecord>();
   const sessions = new Map<string, AssessmentSession>();
   const auditLog: AuditEvent[] = [];
+  const documentExtractions = new Map<string, DocumentExtraction>();
+  const derivedFacts = new Map<string, DerivedFact>();
+  const ruleEvaluations = new Map<string, RuleEvaluation>();
+  const findings = new Map<string, Finding>();
+  const reports = new Map<string, Report>();
 
   const organizationRepo: OrganizationRepository = {
     async create(input: NewOrganizationInput): Promise<Organization> {
@@ -231,6 +252,159 @@ export function createInMemoryRepositories(): Repositories {
     },
   };
 
+  const documentExtractionRepo: DocumentExtractionRepository = {
+    async create(input: NewDocumentExtractionInput): Promise<DocumentExtraction> {
+      const record: DocumentExtraction = {
+        id: randomUUID(),
+        documentId: input.documentId,
+        schemaName: input.schemaName,
+        schemaVersion: input.schemaVersion,
+        provider: input.provider,
+        model: input.model,
+        extractionJson: input.extractionJson,
+        confidenceJson: input.confidenceJson,
+        evidenceJson: input.evidenceJson,
+        status: input.status,
+        createdAt: new Date().toISOString(),
+      };
+      documentExtractions.set(record.id, record);
+      return record;
+    },
+    async listByDocument(documentId: string): Promise<DocumentExtraction[]> {
+      return [...documentExtractions.values()].filter((e) => e.documentId === documentId);
+    },
+    async listByAssessment(assessmentId: string): Promise<DocumentExtraction[]> {
+      const docIds = new Set(
+        [...documents.values()].filter((d) => d.assessmentId === assessmentId).map((d) => d.id),
+      );
+      return [...documentExtractions.values()].filter((e) => docIds.has(e.documentId));
+    },
+  };
+
+  const derivedFactRepo: DerivedFactRepository = {
+    async create(input: NewDerivedFactInput): Promise<DerivedFact> {
+      const fact: DerivedFact = {
+        id: randomUUID(),
+        assessmentId: input.assessmentId,
+        factKey: input.factKey,
+        valueJson: input.valueJson,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId ?? null,
+        confidence: input.confidence ?? null,
+        createdAt: new Date().toISOString(),
+      };
+      derivedFacts.set(fact.id, fact);
+      return fact;
+    },
+    async listByAssessment(assessmentId: string): Promise<DerivedFact[]> {
+      return [...derivedFacts.values()].filter((f) => f.assessmentId === assessmentId);
+    },
+  };
+
+  const ruleEvaluationRepo: RuleEvaluationRepository = {
+    async create(input: NewRuleEvaluationInput): Promise<RuleEvaluation> {
+      const evaluation: RuleEvaluation = {
+        id: randomUUID(),
+        assessmentId: input.assessmentId,
+        ruleId: input.ruleId,
+        ruleVersion: input.ruleVersion,
+        matched: input.matched,
+        inputSnapshot: input.inputSnapshot,
+        baseSeverity: input.baseSeverity,
+        scopePoints: input.scopePoints,
+        durationPoints: input.durationPoints,
+        systemicPoints: input.systemicPoints,
+        disputePoints: input.disputePoints,
+        overrideCritical: input.overrideCritical,
+        riskScore: input.riskScore,
+        riskLevel: input.riskLevel,
+        confidence: input.confidence ?? null,
+        createdAt: new Date().toISOString(),
+      };
+      ruleEvaluations.set(evaluation.id, evaluation);
+      return evaluation;
+    },
+    async listByAssessment(assessmentId: string): Promise<RuleEvaluation[]> {
+      return [...ruleEvaluations.values()].filter((e) => e.assessmentId === assessmentId);
+    },
+  };
+
+  const findingRepo: FindingRepository = {
+    async create(input: NewFindingInput): Promise<Finding> {
+      const now = new Date().toISOString();
+      const finding: Finding = {
+        id: randomUUID(),
+        assessmentId: input.assessmentId,
+        ruleEvaluationId: input.ruleEvaluationId ?? null,
+        category: input.category,
+        subCategory: input.subCategory ?? null,
+        internalTitle: input.internalTitle,
+        clientTitle: input.clientTitle ?? null,
+        draftInternalText: input.draftInternalText ?? null,
+        draftClientText: input.draftClientText ?? null,
+        recommendedAction: input.recommendedAction ?? null,
+        riskScore: input.riskScore ?? null,
+        riskLevel: input.riskLevel ?? null,
+        confidence: input.confidence ?? null,
+        status: "draft",
+        visibleToClient: false,
+        lawyerNotes: null,
+        severityOverride: null,
+        overrideReason: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      findings.set(finding.id, finding);
+      return finding;
+    },
+    async listByAssessment(assessmentId: string): Promise<Finding[]> {
+      return [...findings.values()].filter((f) => f.assessmentId === assessmentId);
+    },
+    async getById(id: string): Promise<Finding | null> {
+      return findings.get(id) ?? null;
+    },
+    async review(id: string, update: FindingReviewUpdate, reviewedBy: string): Promise<Finding> {
+      const finding = findings.get(id);
+      if (!finding) throw new Error(`Finding ${id} not found`);
+      if (update.severityOverride != null && !update.overrideReason) {
+        throw new Error("override_requires_reason");
+      }
+      const updated: Finding = {
+        ...finding,
+        ...update,
+        reviewedBy,
+        reviewedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      findings.set(id, updated);
+      return updated;
+    },
+  };
+
+  const reportRepo: ReportRepository = {
+    async create(input: NewReportInput): Promise<Report> {
+      const report: Report = {
+        id: randomUUID(),
+        assessmentId: input.assessmentId,
+        reportType: input.reportType,
+        version: input.version,
+        storagePath: input.storagePath,
+        generatedBy: input.generatedBy ?? null,
+        generatedAt: new Date().toISOString(),
+      };
+      reports.set(report.id, report);
+      return report;
+    },
+    async listByAssessment(assessmentId: string): Promise<Report[]> {
+      return [...reports.values()].filter((r) => r.assessmentId === assessmentId);
+    },
+    async getById(id: string): Promise<Report | null> {
+      return reports.get(id) ?? null;
+    },
+  };
+
   return {
     organizations: organizationRepo,
     assessments: assessmentRepo,
@@ -238,5 +412,10 @@ export function createInMemoryRepositories(): Repositories {
     audit: auditRepo,
     documents: documentRepo,
     assessmentSessions: assessmentSessionRepo,
+    documentExtractions: documentExtractionRepo,
+    derivedFacts: derivedFactRepo,
+    ruleEvaluations: ruleEvaluationRepo,
+    findings: findingRepo,
+    reports: reportRepo,
   };
 }

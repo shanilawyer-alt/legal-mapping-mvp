@@ -6,9 +6,14 @@ import type {
   AssessmentSessionRepository,
   AuditRepository,
   CreateAssessmentInput,
+  DerivedFactRepository,
+  DocumentExtractionRepository,
   DocumentRepository,
+  FindingRepository,
   OrganizationRepository,
+  ReportRepository,
   Repositories,
+  RuleEvaluationRepository,
 } from "@/lib/db/repositories";
 import type {
   Answer,
@@ -18,11 +23,22 @@ import type {
   AssessmentStatus,
   AuditEvent,
   AuditEventInput,
+  DerivedFact,
+  DocumentExtraction,
   DocumentRecord,
+  Finding,
+  FindingReviewUpdate,
+  NewDerivedFactInput,
+  NewDocumentExtractionInput,
   NewAssessmentSessionInput,
   NewDocumentInput,
+  NewFindingInput,
   NewOrganizationInput,
+  NewReportInput,
+  NewRuleEvaluationInput,
   Organization,
+  Report,
+  RuleEvaluation,
 } from "@/lib/db/types";
 
 /** Postgres-backed repository adapters, built on the service-role client. */
@@ -252,7 +268,208 @@ export function createSupabaseRepositories(client: SupabaseClient): Repositories
     },
   };
 
-  return { organizations, assessments, answers, audit, documents, assessmentSessions };
+  const documentExtractions: DocumentExtractionRepository = {
+    async create(input: NewDocumentExtractionInput): Promise<DocumentExtraction> {
+      const { data, error } = await client
+        .from("document_extractions")
+        .insert({
+          document_id: input.documentId,
+          schema_name: input.schemaName,
+          schema_version: input.schemaVersion,
+          provider: input.provider,
+          model: input.model,
+          extraction_json: input.extractionJson,
+          confidence_json: input.confidenceJson,
+          evidence_json: input.evidenceJson,
+          status: input.status,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return mapDocumentExtraction(data);
+    },
+    async listByDocument(documentId: string): Promise<DocumentExtraction[]> {
+      const { data, error } = await client
+        .from("document_extractions")
+        .select()
+        .eq("document_id", documentId);
+      if (error) throw error;
+      return (data ?? []).map(mapDocumentExtraction);
+    },
+    async listByAssessment(assessmentId: string): Promise<DocumentExtraction[]> {
+      const { data, error } = await client
+        .from("document_extractions")
+        .select("*, documents!inner(assessment_id)")
+        .eq("documents.assessment_id", assessmentId);
+      if (error) throw error;
+      return (data ?? []).map(mapDocumentExtraction);
+    },
+  };
+
+  const derivedFacts: DerivedFactRepository = {
+    async create(input: NewDerivedFactInput): Promise<DerivedFact> {
+      const { data, error } = await client
+        .from("derived_facts")
+        .insert({
+          assessment_id: input.assessmentId,
+          fact_key: input.factKey,
+          value_json: input.valueJson,
+          source_type: input.sourceType,
+          source_id: input.sourceId ?? null,
+          confidence: input.confidence ?? null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return mapDerivedFact(data);
+    },
+    async listByAssessment(assessmentId: string): Promise<DerivedFact[]> {
+      const { data, error } = await client
+        .from("derived_facts")
+        .select()
+        .eq("assessment_id", assessmentId);
+      if (error) throw error;
+      return (data ?? []).map(mapDerivedFact);
+    },
+  };
+
+  const ruleEvaluations: RuleEvaluationRepository = {
+    async create(input: NewRuleEvaluationInput): Promise<RuleEvaluation> {
+      const { data, error } = await client
+        .from("rule_evaluations")
+        .insert({
+          assessment_id: input.assessmentId,
+          rule_id: input.ruleId,
+          rule_version: input.ruleVersion,
+          matched: input.matched,
+          input_snapshot: input.inputSnapshot,
+          base_severity: input.baseSeverity,
+          scope_points: input.scopePoints,
+          duration_points: input.durationPoints,
+          systemic_points: input.systemicPoints,
+          dispute_points: input.disputePoints,
+          override_critical: input.overrideCritical,
+          risk_score: input.riskScore,
+          risk_level: input.riskLevel,
+          confidence: input.confidence ?? null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return mapRuleEvaluation(data);
+    },
+    async listByAssessment(assessmentId: string): Promise<RuleEvaluation[]> {
+      const { data, error } = await client
+        .from("rule_evaluations")
+        .select()
+        .eq("assessment_id", assessmentId);
+      if (error) throw error;
+      return (data ?? []).map(mapRuleEvaluation);
+    },
+  };
+
+  const findings: FindingRepository = {
+    async create(input: NewFindingInput): Promise<Finding> {
+      const { data, error } = await client
+        .from("findings")
+        .insert({
+          assessment_id: input.assessmentId,
+          rule_evaluation_id: input.ruleEvaluationId ?? null,
+          category: input.category,
+          sub_category: input.subCategory ?? null,
+          internal_title: input.internalTitle,
+          client_title: input.clientTitle ?? null,
+          draft_internal_text: input.draftInternalText ?? null,
+          draft_client_text: input.draftClientText ?? null,
+          recommended_action: input.recommendedAction ?? null,
+          risk_score: input.riskScore ?? null,
+          risk_level: input.riskLevel ?? null,
+          confidence: input.confidence ?? null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return mapFinding(data);
+    },
+    async listByAssessment(assessmentId: string): Promise<Finding[]> {
+      const { data, error } = await client
+        .from("findings")
+        .select()
+        .eq("assessment_id", assessmentId);
+      if (error) throw error;
+      return (data ?? []).map(mapFinding);
+    },
+    async getById(id: string): Promise<Finding | null> {
+      const { data, error } = await client.from("findings").select().eq("id", id).maybeSingle();
+      if (error) throw error;
+      return data ? mapFinding(data) : null;
+    },
+    async review(id: string, update: FindingReviewUpdate, reviewedBy: string): Promise<Finding> {
+      if (update.severityOverride != null && !update.overrideReason) {
+        throw new Error("override_requires_reason");
+      }
+      const patch: Record<string, unknown> = { reviewed_by: reviewedBy, reviewed_at: new Date().toISOString() };
+      if (update.status !== undefined) patch.status = update.status;
+      if (update.visibleToClient !== undefined) patch.visible_to_client = update.visibleToClient;
+      if (update.lawyerNotes !== undefined) patch.lawyer_notes = update.lawyerNotes;
+      if (update.severityOverride !== undefined) patch.severity_override = update.severityOverride;
+      if (update.overrideReason !== undefined) patch.override_reason = update.overrideReason;
+
+      const { data, error } = await client
+        .from("findings")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return mapFinding(data);
+    },
+  };
+
+  const reports: ReportRepository = {
+    async create(input: NewReportInput): Promise<Report> {
+      const { data, error } = await client
+        .from("reports")
+        .insert({
+          assessment_id: input.assessmentId,
+          report_type: input.reportType,
+          version: input.version,
+          storage_path: input.storagePath,
+          generated_by: input.generatedBy ?? null,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return mapReport(data);
+    },
+    async listByAssessment(assessmentId: string): Promise<Report[]> {
+      const { data, error } = await client
+        .from("reports")
+        .select()
+        .eq("assessment_id", assessmentId);
+      if (error) throw error;
+      return (data ?? []).map(mapReport);
+    },
+    async getById(id: string): Promise<Report | null> {
+      const { data, error } = await client.from("reports").select().eq("id", id).maybeSingle();
+      if (error) throw error;
+      return data ? mapReport(data) : null;
+    },
+  };
+
+  return {
+    organizations,
+    assessments,
+    answers,
+    audit,
+    documents,
+    assessmentSessions,
+    documentExtractions,
+    derivedFacts,
+    ruleEvaluations,
+    findings,
+    reports,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -341,5 +558,99 @@ function mapAuditEvent(row: any): AuditEvent {
     eventType: row.event_type,
     metadataJson: row.metadata_json,
     createdAt: row.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapDocumentExtraction(row: any): DocumentExtraction {
+  return {
+    id: row.id,
+    documentId: row.document_id,
+    schemaName: row.schema_name,
+    schemaVersion: row.schema_version,
+    provider: row.provider,
+    model: row.model,
+    extractionJson: row.extraction_json,
+    confidenceJson: row.confidence_json,
+    evidenceJson: row.evidence_json,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapDerivedFact(row: any): DerivedFact {
+  return {
+    id: row.id,
+    assessmentId: row.assessment_id,
+    factKey: row.fact_key,
+    valueJson: row.value_json,
+    sourceType: row.source_type,
+    sourceId: row.source_id,
+    confidence: row.confidence,
+    createdAt: row.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRuleEvaluation(row: any): RuleEvaluation {
+  return {
+    id: row.id,
+    assessmentId: row.assessment_id,
+    ruleId: row.rule_id,
+    ruleVersion: row.rule_version,
+    matched: row.matched,
+    inputSnapshot: row.input_snapshot,
+    baseSeverity: row.base_severity,
+    scopePoints: row.scope_points,
+    durationPoints: row.duration_points,
+    systemicPoints: row.systemic_points,
+    disputePoints: row.dispute_points,
+    overrideCritical: row.override_critical,
+    riskScore: row.risk_score,
+    riskLevel: row.risk_level,
+    confidence: row.confidence,
+    createdAt: row.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapFinding(row: any): Finding {
+  return {
+    id: row.id,
+    assessmentId: row.assessment_id,
+    ruleEvaluationId: row.rule_evaluation_id,
+    category: row.category,
+    subCategory: row.sub_category,
+    internalTitle: row.internal_title,
+    clientTitle: row.client_title,
+    draftInternalText: row.draft_internal_text,
+    draftClientText: row.draft_client_text,
+    recommendedAction: row.recommended_action,
+    riskScore: row.risk_score,
+    riskLevel: row.risk_level,
+    confidence: row.confidence,
+    status: row.status,
+    visibleToClient: row.visible_to_client,
+    lawyerNotes: row.lawyer_notes,
+    severityOverride: row.severity_override,
+    overrideReason: row.override_reason,
+    reviewedBy: row.reviewed_by,
+    reviewedAt: row.reviewed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapReport(row: any): Report {
+  return {
+    id: row.id,
+    assessmentId: row.assessment_id,
+    reportType: row.report_type,
+    version: row.version,
+    storagePath: row.storage_path,
+    generatedBy: row.generated_by,
+    generatedAt: row.generated_at,
   };
 }
