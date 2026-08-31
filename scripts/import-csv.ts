@@ -29,6 +29,8 @@ import {
 import { parseCsv, type RowValidationError } from "../domain/csv/parse";
 import { findDanglingQuestionRefs, findDuplicateIds } from "../domain/csv/referential";
 import { normalizeQuestionnaireRow } from "../domain/questionnaire/normalize";
+import { applyTriggerValueFixes, findTriggerValueMismatches } from "../domain/questionnaire/triggerValueFixes";
+import { applyDocumentTypeMapping, validateDocumentTypeMapping } from "../domain/questionnaire/documentTypeMapping";
 
 const DATA_DIR = join(__dirname, "..", "data");
 const OUT_DIR = join(DATA_DIR, "generated");
@@ -91,6 +93,22 @@ function main() {
     }
   }
 
+  // OPEN_QUESTIONS.md item 30 (resolved): a small, hand-verified set of
+  // trigger clauses use a short-form value that isn't one of the target
+  // question's real options (e.g. TIME-07's "TIME-06 = כן/לעיתים" vs.
+  // TIME-06's real options "כן, באופן קבוע" / "כן, לעיתים"). Corrects
+  // only the *compiled* trigger AST written below — questionnaire.csv's
+  // own wording/IDs are never touched. Re-validates immediately after,
+  // so any future questionnaire.csv change introducing a new mismatch
+  // fails this build rather than silently producing an unreachable
+  // question again.
+  const fixedQuestionnaireItems = applyDocumentTypeMapping(applyTriggerValueFixes(questionnaireItems));
+  for (const mismatch of findTriggerValueMismatches(fixedQuestionnaireItems)) {
+    questionnaireErrors.push(
+      `${mismatch.ownerQuestionId} trigger references ${mismatch.targetQuestionId}="${mismatch.badValue}", which is not one of its real options (${mismatch.realOptions.join(" | ")}) — add a TRIGGER_VALUE_FIXES entry in domain/questionnaire/triggerValueFixes.ts`,
+    );
+  }
+
   reports.push({
     file: "questionnaire.csv",
     rowCount: questionnaireParsed.rows.length,
@@ -117,6 +135,18 @@ function main() {
       );
     }
   }
+  // Pre-pilot defect (resolved, see PILOT_VALIDATION_PLAN.md §2): resolves
+  // each document-upload question to its real DOC-01..DOC-08 ID, since
+  // questionnaire.csv's own free-text מסמך להעלאה label only happens to
+  // exactly match document_analysis_matrix.csv's wording for one of the
+  // eight upload questions. Re-validated immediately after against the
+  // real CSV so a future mismatch fails the build.
+  for (const issue of validateDocumentTypeMapping(fixedQuestionnaireItems, docMatrixParsed.rows)) {
+    docMatrixErrors.push(
+      `DOCUMENT_TYPE_BY_QUESTION_ID: ${issue.questionId} ${issue.problem} — see domain/questionnaire/documentTypeMapping.ts`,
+    );
+  }
+
   reports.push({
     file: "document_analysis_matrix.csv",
     rowCount: docMatrixParsed.rows.length,
@@ -221,7 +251,7 @@ function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(
     join(OUT_DIR, "questionnaire.json"),
-    JSON.stringify(questionnaireItems, null, 2),
+    JSON.stringify(fixedQuestionnaireItems, null, 2),
   );
   writeFileSync(
     join(OUT_DIR, "rule_catalog.json"),

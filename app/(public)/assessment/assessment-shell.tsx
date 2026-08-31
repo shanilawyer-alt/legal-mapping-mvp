@@ -205,7 +205,10 @@ export function AssessmentShell({
             </div>
             <SaveIndicator state={saveStateByQuestion[item.id]} />
             {item.documentRequest ? (
-              <DocumentUpload documentType={item.documentRequest} label={item.documentRequest} />
+              <DocumentUpload
+                documentType={item.documentTypeId ?? item.documentRequest}
+                label={item.documentRequest}
+              />
             ) : null}
           </div>
         ))}

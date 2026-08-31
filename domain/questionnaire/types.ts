@@ -43,6 +43,8 @@ export interface QuestionnaireItem {
   readonly triggerCondition: ConditionNode;
   readonly followUp: string;
   readonly documentRequest: string;
+  /** "DOC-01".."DOC-08" (document_analysis_matrix.csv), or null when this upload has no extraction schema (e.g. LIT-02's optional litigation filing). See domain/questionnaire/documentTypeMapping.ts. */
+  readonly documentTypeId: string | null;
   readonly internalCheck: string;
   readonly possibleService: string;
   readonly isCore: boolean;

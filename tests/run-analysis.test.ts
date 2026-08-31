@@ -188,27 +188,17 @@ describe("runAnalysis — full pipeline", () => {
 
   it("R-TIME-003 and R-PAY-002 match end-to-end via the cross-check engine on the B-overtime-mismatch fixture", async () => {
     const org = await repos.organizations.create({ legalName: "עסק" });
-    const { assessment, rawToken } = await createAssessmentWithToken(
-      repos,
-      { organizationId: org.id },
-      "admin-1",
-    );
+    const { rawToken } = await createAssessmentWithToken(repos, { organizationId: org.id }, "admin-1");
     const session = await createSessionForToken(repos, rawToken);
     if (!session.ok) throw new Error("setup failed");
     await answerAllCoreQuestions(session.rawSessionToken);
-    // Pre-existing data finding (unrelated to Phase 3, not fixed here —
-    // reported separately): questionnaire.csv's own TIME-07 trigger is
-    // "TIME-06 = כן/לעיתים", compiled by the exact-match branching engine
-    // (domain/branching/evaluate.ts, Phase 1) into clause values ["כן",
-    // "לעיתים"] — but neither is an exact TIME-06 option string (TIME-06's
-    // real options are "כן, באופן קבוע" / "כן, לעיתים" / "לא" / "לא יודעת"),
-    // so TIME-07 can never actually become visible from any real client
-    // answer. Bypassing the client-facing option-validation layer here
-    // (repos.answers.upsert directly, not submitAnswerForSession) only to
-    // reach the branching engine's own literal trigger value, purely to
-    // exercise runAnalysis's downstream cross-check/rule-evaluation
-    // integration — not a claim this state is reachable through the UI.
-    await repos.answers.upsert(assessment.id, "TIME-06", "כן", "client");
+    // OPEN_QUESTIONS.md item 30 is now resolved (PILOT_VALIDATION_PLAN.md):
+    // TIME-06="כן, באופן קבוע" is a real option and now genuinely activates
+    // TIME-07 (domain/questionnaire/triggerValueFixes.ts corrects the
+    // compiled trigger AST at import time) — reachable through the normal
+    // submitAnswerForSession path, no bypass needed anymore.
+    const time06 = await submitAnswerForSession(repos, session.rawSessionToken, "TIME-06", "כן, באופן קבוע");
+    if (!time06.ok) throw new Error(`TIME-06 setup failed: ${time06.error}`);
     const time07 = await submitAnswerForSession(repos, session.rawSessionToken, "TIME-07", [
       "רכיב שעות נוספות גלובלי",
     ]);

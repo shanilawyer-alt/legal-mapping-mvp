@@ -204,9 +204,26 @@ export default async function AdminAssessmentDetailPage({
           <h2 className="text-lg font-medium text-slate-900">פרופיל עסק</h2>
           <div className="flex shrink-0 flex-wrap gap-2">
             {canRunAnalysis ? (
-              <form action={runAnalysisAction.bind(null, assessment.id)}>
+              <form
+                action={runAnalysisAction.bind(null, assessment.id)}
+                className="flex flex-col items-end gap-1 rounded-md border border-dashed border-amber-300 bg-amber-50 p-2"
+              >
+                <label className="text-xs text-amber-800">
+                  תג פיקסצ&apos;ר לפיילוט מבוקר בלבד — יש להשאיר ריק עבור לקוח אמיתי
+                  <select
+                    name="pilotFixtureTag"
+                    defaultValue=""
+                    className="mt-1 block w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs"
+                  >
+                    <option value="">— ריק (התנהגות אמיתית, ללא חילוץ AI) —</option>
+                    <option value="A-clean">A-clean</option>
+                    <option value="B-overtime-mismatch">B-overtime-mismatch</option>
+                    <option value="C-privacy-gap">C-privacy-gap</option>
+                    <option value="D-freelancer-dependency">D-freelancer-dependency</option>
+                  </select>
+                </label>
                 <ConfirmSubmitButton
-                  confirmMessage="להריץ ניתוח על המיפוי? הפעולה תסמן את המיפוי כ'בבדיקת עורך/ת דין' ולא ניתן יהיה להריץ שוב."
+                  confirmMessage="להריץ ניתוח על המיפוי? הפעולה תסמן את המיפוי כ'בבדיקת עורך/ת דין' ולא ניתן יהיה להריץ שוב. תג פיקסצ'ר משמש לפיילוט מבוקר בלבד — לעולם לא עבור לקוח אמיתי."
                   className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
                 >
                   הרצת ניתוח

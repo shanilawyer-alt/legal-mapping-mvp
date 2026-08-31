@@ -53,6 +53,7 @@ export function normalizeQuestionnaireRow(row: QuestionnaireRow): QuestionnaireI
     triggerCondition,
     followUp: row["שאלת המשך / פעולה"],
     documentRequest: row["מסמך להעלאה"],
+    documentTypeId: null, // resolved by domain/questionnaire/documentTypeMapping.ts at import time
     internalCheck: row["בדיקה פנימית בשלב הניתוח"],
     possibleService: row["שירות/צורך שעשוי להתגלות"],
     isCore: row["ליבה/מותנה"] === "ליבה",

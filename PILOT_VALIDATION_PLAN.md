@@ -1,0 +1,143 @@
+# Pilot Validation Plan
+
+Phase 3 is accepted as technically `PILOT_READY`. This document covers **Pilot Validation**: verifying the existing product in a real deployed environment and preparing it for one controlled, attorney-led pilot — before any real client receives access. No new features are added here beyond what was required to fix a defect blocking the controlled pilot (see §3 and §6). No Phase 4 work is in scope.
+
+Structure: §1 classifies `OPEN_QUESTIONS.md` items 21–30 for pilot readiness. §2 triages and resolves item 30, plus a second, more severe pre-pilot defect found while preparing the pilot fixture. §3 is the Supabase live-environment verification checklist. §4 reports what was actually verified in this session versus what still needs a real Supabase project. §5 describes the synthetic pilot fixture. §6 explains the two small code changes made and why. §7 is the final status.
+
+## 1. OPEN_QUESTIONS.md items 21–30 — pilot classification
+
+No policy is changed here — every decision already recorded in items 21–29 stands as written. This section only classifies each for pilot purposes.
+
+| Item | Classification | Why |
+|---|---|---|
+| **21** — rule automation-level policy (Manual/undecidable rules never auto-resolved) | `SAFE_FOR_CONTROLLED_PILOT` | Conservative by construction: an ambiguous rule is always routed to the attorney, never silently guessed. No change needed for any pilot. |
+| **22** — `ANALYZED → LAWYER_REVIEW` combined into one atomic "Run Analysis" | `SAFE_FOR_CONTROLLED_PILOT` | Workflow simplification only; the mandatory per-finding review gate is unweakened. |
+| **23** — HTML report preview, not binary PDF | `SAFE_FOR_CONTROLLED_PILOT` | Functionally complete for a controlled pilot (viewed via a signed URL in the admin UI). A downloadable PDF is a legitimate `POST_PILOT` enhancement, not a blocker. |
+| **24** — single Run Analysis per assessment, no re-run path | `SAFE_FOR_CONTROLLED_PILOT` (operational note) | Acceptable for a closely-supervised pilot where the attorney controls document quality before running analysis. **Operational consequence**: if the attorney uploads the wrong document or answers a question incorrectly before running analysis, there is no in-place correction — a fresh assessment must be created. The runbook (§5 / `PILOT_RUNBOOK.md`) calls this out explicitly. |
+| **25** — synthetic-only document extraction, no live AI provider | `SAFE_FOR_CONTROLLED_PILOT` **and** `BLOCKS_REAL_PILOT` (both, depending on which client) | For the controlled pilot (synthetic fixture data, §5), this is exactly the intended, already-tested path — safe. For any **real client's real documents**, extraction will always return `status: "failed", failureReason: "no_provider_available"` — there is no way to read real document content today. **This must be disclosed to the real client and/or resolved (a real AI/document-processing provider wired in) before any real client is told their documents were analyzed.** Not something this pilot-validation pass can close — it requires a product/vendor decision outside this codebase's current scope. |
+| **26** — attorney-only actions gated by "any authenticated Supabase user," not `admin_profiles`-scoped | `SAFE_FOR_CONTROLLED_PILOT`, **conditionally** | Confirmed via fresh RLS testing (§4) that the *database* enforces an `admin_profiles`-scoped policy correctly — but the running app never hits that policy (it uses the service-role key, which bypasses RLS by design; see `lib/supabase/server.ts`). The app's actual gate is "does a valid Supabase Auth session exist," full stop. **Condition for the controlled pilot**: the live Supabase project's Auth user list must be verified to contain only the attorney's own account, with public sign-up disabled (checklist item, §3). Without that verification this is `BLOCKS_REAL_PILOT` — any person who can create a Supabase Auth session for the project can approve and release a report to a real client. |
+| **27** — no freelancer-screening level; disclosure sentence is English-only | `SAFE_FOR_CONTROLLED_PILOT` | The client report never shows the freelancer section at all (item 29 §3), so there is no client-facing exposure. English-only disclosure is internal-report-only. An approved Hebrew translation is a reasonable `POST_PILOT` item. |
+| **28** — conservative risk scoring (no scope/duration/systemic/dispute inputs) | `SAFE_FOR_CONTROLLED_PILOT` (operational note) | Deliberately a lower bound, never overstates exposure; the attorney's existing severity-override action is the correction path. **Operational consequence**: pilot risk scores will read lower than a fully-scoped assessment would produce. The runbook flags this so the attorney isn't surprised by, e.g., a CRITICAL-severity rule showing a `riskScore` of 50 rather than 80+. |
+| **29** — three `report_structure.csv` cells omitted (executive narrative, sensitive-data flag, freelancer level) | `SAFE_FOR_CONTROLLED_PILOT` | Omission, never invention. Worth disclosing to the attorney in the runbook so the report's minimalism (a factual tally, not prose) is expected, not read as a bug. |
+| **30** — `TIME-07` trigger unreachable from real answers | **Resolved** — no longer a pilot blocker | See §2. Fixed, tested, and verified to introduce zero behavior change for every other trigger. |
+
+**Bottom line for `READY_FOR_ATTORNEY_PILOT`** (see §7): nothing above blocks the *controlled, attorney-operated* pilot on synthetic data. Two items (25, 26) are explicit, named preconditions for ever inviting a *real* client, and must be re-confirmed (26) or resolved (25) before that happens — this plan does not authorize a real-client pilot.
+
+## 2. Two pre-pilot defects found and fixed
+
+### 2a. Item 30 triage: `TIME-07` trigger incompatibility
+
+### Root cause, precisely
+
+`domain/branching/parser.ts` parses a trigger string like `"TIME-06 = כן/לעיתים"` into a `Clause` whose `values` are the literal tokens split on `/` (here: `["כן", "לעיתים"]`) — a deliberately small, literal grammar with no fuzzy matching (see the parser's own docstring). `domain/branching/evaluate.ts`'s `matchesAny` then requires an **exact** string match between a stored answer and one of those literal values. This is correct behavior for ~97 of `questionnaire.csv`'s 103 trigger clauses, whose short-form values are exact substrings of the target question's real option list.
+
+A **systematic scan** (cross-referencing every trigger clause's values against its target question's actual `options` array, done fresh during this pilot-validation pass) found **10 mismatches across 6 questions**, not just the one (`TIME-07`) item 30 originally named:
+
+| Owner | Target | Bad token(s) | Target's real options |
+|---|---|---|---|
+| `TIME-02` | `TIME-01` | `"כן"`, `"חלק"` | `"כן, כולם"` / `"רק עובדים שעתיים"` / `"רק חלק מהעובדים"` / `"לא"` / `"לא יודעת"` |
+| `TIME-03` | `TIME-01` | `"רק חלק"`, `"רק שעתיים"` | (same as above) |
+| `TIME-07` | `TIME-06` | `"כן"`, `"לעיתים"` | `"כן, באופן קבוע"` / `"כן, לעיתים"` / `"לא"` / `"לא יודעת"` |
+| `TIME-09` | `TIME-06` | `"כן"`, `"לעיתים"` | (same as above — identical trigger text to `TIME-07`) |
+| `TIME-08` | `TIME-07` | `"שעות נוספות גלובליות"` | `"לפי שעות שבוצעו בפועל"` / `"רכיב שעות נוספות גלובלי"` / `"כלולות בשכר החודשי"` / `"לא משולמות בנפרד"` / `"אחר"` / `"לא יודעת"` |
+| `SOC-08` | `SOC-07` | `"כן"` | `"כן, לכל העובדים"` / `"כן, לחלק מהעובדים"` / `"לא"` / `"לא יודעת"` |
+
+Practical effect before the fix: none of `TIME-02`, `TIME-03`, `TIME-07`, `TIME-08`, `TIME-09`, `SOC-08` could ever become visible from a real client's answers — six legitimate, client-facing questions were dead code in the live questionnaire, and by extension `R-TIME-002`/`R-TIME-003` (which read `TIME-07`) could never auto-fire from genuine input.
+
+### Why this isn't a simple "loosen the matcher" fix
+
+The 10 mismatches are not one uniform pattern: some are a short token that's an exact **prefix** of one real option (`"כן"` → `"כן, כולם"`); some require picking between two options that share the same prefix, resolved only by a companion token claiming the other one (`TIME-07`'s `"כן"`/`"לעיתים"` pair); one is a **paraphrase**, not a substring or prefix at all (`TIME-08`'s `"שעות נוספות גלובליות"` vs. the real `"רכיב שעות נוספות גלובלי"` — different word order and suffix). A single generic fuzzy-matching rule (e.g., "try a prefix match") would silently mis-resolve at least one of these, and — worse — would change matching behavior for all 103 questions' triggers, risking a regression in the ~97 that already work correctly. That is a materially larger blast radius than this defect justifies fixing.
+
+### The fix actually made (smallest correct fix)
+
+**`questionnaire.csv` itself was not touched** (confirmed via `git diff --stat -- data/questionnaire.csv`, empty). Six clauses' *compiled* trigger values are corrected at CSV-import time, by a new, explicit, hand-verified lookup table — `domain/questionnaire/triggerValueFixes.ts`'s `TRIGGER_VALUE_FIXES` — applied in `scripts/import-csv.ts` right after the existing dangling-question-reference check, before the generated `questionnaire.json` snapshot is written. This mirrors the exact discipline already used for `rule_catalog.csv`'s abbreviated conditions (`domain/rules/catalog.ts`): each short token is resolved to the literal real option string(s) it unambiguously names, with the reasoning documented per entry — nothing invented, nothing guessed. Where a token maps to more than one real option (e.g. `SOC-08`'s bare `"כן"` → both `"כן, לכל העובדים"` and `"כן, לחלק מהעובדים"`, since nothing narrows it further and the question is relevant either way), the clause's existing `values: string[]` OR-semantics already supports that with no new AST shape needed.
+
+A companion function, `findTriggerValueMismatches()`, cross-checks the *entire* compiled questionnaire against real option lists and is run in `scripts/import-csv.ts` as a build-time gate — any future `questionnaire.csv` edit that introduces a new mismatch fails the build immediately with a specific, actionable error, rather than silently shipping another unreachable question.
+
+**Verified**: zero mismatches remain in the freshly-regenerated `data/generated/questionnaire.json`; 14 new tests (`tests/trigger-value-fixes.test.ts`) cover every one of the six fixes plus an idempotency/no-side-effect check on the other 97 items; `tests/run-analysis.test.ts`'s cross-check integration test now reaches `TIME-07` through a genuinely real, valid `TIME-06` answer (previously it had to bypass answer validation to reach the literal broken trigger token — that bypass is now removed). Full suite, typecheck, lint, and `next build` all pass.
+
+### 2b. A second, more severe defect: real document uploads never carried a usable `documentType`
+
+**Found while designing the pilot fixture's document-upload step (§5)**, not part of item 30, but the same category of defect and treated the same way: identified, documented, smallest correct fix applied, verified, before moving on.
+
+**Root cause**: `app/(public)/assessment/assessment-shell.tsx` rendered each document-upload widget as `<DocumentUpload documentType={item.documentRequest} ... />` — `item.documentRequest` is `questionnaire.csv`'s own free-Hebrew-text `מסמך להעלאה` column (e.g. `"הסכם עבודה מייצג"`), sent to `POST /api/documents` and stored verbatim as `DocumentRecord.documentType`. Every downstream consumer of that field — `EXTRACTION_SCHEMAS_BY_DOCUMENT_TYPE`, `SYNTHETIC_FIXTURES`, `RULE_CATALOG`'s document-type inputs, the whole Phase 3 extraction pipeline — is keyed on the canonical `"DOC-01"`–`"DOC-08"` IDs from `document_analysis_matrix.csv`. A fresh cross-reference of all 8 document-upload questions' `מסמך להעלאה` text against `document_analysis_matrix.csv`'s own `"מה מבקשים מהלקוח"` column found **only one exact match** (`EMP-01` → `"הסכם עבודה מייצג"` → `DOC-01`) — the other seven use different-but-synonymous Hebrew phrasing across the two independently-authored CSV columns (e.g. `EMP-02`'s `"הודעה לעובד"` vs. `DOC-02`'s own `"סוג מסמך"`, which is also `"הודעה לעובד"` — same document, different CSV column, never designed to be machine-compared).
+
+**Practical effect before the fix**: uploading *any* document through the real client questionnaire — for every document type except `DOC-01` — stored a `documentType` value that could never match any extraction schema. Extraction would always fail with `unsupported_document_type`, regardless of any fixture tag, for 7 of the 8 document categories. This was never caught by the existing Phase 3 test suite because every test calls `uploadDocumentForSession()` directly with a literal `"DOC-01"`/`"DOC-03"`/etc. string, bypassing the actual React component real users interact with.
+
+**Fix**: same discipline as item 30 — `questionnaire.csv` and `document_analysis_matrix.csv` are both untouched (`git diff --stat -- data/` stays empty). A new field, `QuestionnaireItem.documentTypeId`, is populated for exactly the 7 resolvable document-upload questions by a new, explicit, hand-verified table (`domain/questionnaire/documentTypeMapping.ts`'s `DOCUMENT_TYPE_BY_QUESTION_ID`), each resolved against the real `document_analysis_matrix.csv`'s own `"סוג מסמך"` and `"שאלות מקושרות"` columns and documented per-entry — never guessed. The eighth (`LIT-02`, an optional court filing) is deliberately left unmapped: `document_analysis_matrix.csv` genuinely has no `DOC-01`–`DOC-08` category for a litigation document, so its upload correctly has no extraction schema, unchanged from today. `assessment-shell.tsx` now passes `item.documentTypeId ?? item.documentRequest` as `documentType` — the label shown to the client is untouched. A companion `validateDocumentTypeMapping()` runs as a build-time gate in `scripts/import-csv.ts`, alongside the item 30 check.
+
+**Verified**: all 7 mappings confirmed against the freshly-regenerated questionnaire snapshot; 7 new tests (`tests/document-type-mapping.test.ts`). Full suite, typecheck, lint, and `next build` all pass — **458 tests total** (up from 437 before both fixes).
+
+## 3. Supabase live-environment verification checklist
+
+For a real Supabase project — run in order, each with an explicit pass/fail check:
+
+1. **Migrations apply cleanly, in order.**
+   `supabase link --project-ref <ref>` → `supabase db push` (or `supabase db reset` against a fresh local stack). Expect all 4 migrations (`20260830000000_init_schema.sql` → `...0001_documents_storage_bucket.sql` → `...0002_assessment_sessions.sql` → `...0003_assessment_status_submitted.sql`) to apply with zero errors. **Check**: `select enum_range(null::assessment_status);` returns exactly `{DRAFT,SUBMITTED,ANALYZED,LAWYER_REVIEW,APPROVED,CLIENT_REPORT_RELEASED}` in that order.
+
+2. **RLS is enabled and behaves correctly on every table, Phase 3 tables included.**
+   Confirm `select relrowsecurity from pg_class where relname in ('assessments','answers','documents','document_extractions','derived_facts','rule_evaluations','findings','reports','audit_events','assessment_sessions');` returns `t` for all. Behaviorally (not just "enabled"): as a Postgres role standing in for `authenticated` with no matching `admin_profiles` row, `SELECT`/`INSERT` on `rule_evaluations`/`findings`/`reports` must return 0 rows / a policy-violation error; the same role, with a session matching a real `admin_profiles.id`, must succeed; reverting to a non-matching id must block again. **This exact sequence was run in this session against a local Postgres 16 instance with the real migration files — see §4 for the fresh result.** Also confirm the `override_requires_reason` check constraint on `findings` rejects a `severity_override` with no `override_reason`, at the database level (independent of the app's own duplicate check).
+
+3. **Admin authentication.**
+   Create exactly one Supabase Auth user for the attorney (`supabase auth admin`, dashboard, or `POST /auth/v1/admin/users`), then insert one matching `admin_profiles` row (`insert into admin_profiles (id, display_name) values ('<auth-user-id>', 'Attorney Name');`). **Check**: signing in at `/admin/login` with that account reaches `/admin`; an unauthenticated request to any `/admin/*` path redirects to `/admin/login` (verify `proxy.ts`'s gate — no live check possible without deploying, see §4). **Check public sign-up is disabled** in Supabase Auth settings (Authentication → Providers → Email → "Allow new users to sign up" off, or organization-level restriction) — this is the actual security boundary for item 26 above, since the app itself only checks "is there a session," not "is this the attorney."
+
+4. **Assessment-token isolation.**
+   Create two assessments (two different `organizations` rows). Confirm: (a) assessment A's raw token resolves only assessment A's data via `POST /assessment/<token>` (or the app's token-exchange route) — never assessment B's; (b) `answers`/`documents`/`document_extractions`/`derived_facts`/`rule_evaluations`/`findings`/`audit_events` rows for A never appear when queried by B's `assessment_id`, and vice versa (this exact check — with real, independently-submitted-and-analyzed data — already passes against the in-memory repository adapter in `tests/pilot-ready.test.ts`'s second test; re-run the equivalent check against the live project).
+
+5. **Storage bucket privacy.**
+   `select public from storage.buckets where id = 'assessment-documents';` must be `false`. Confirm no `storage.objects` policy grants `anon`/`authenticated` direct read/write (the migration intentionally grants none — every access goes through server-side signed URLs). Attempt an unauthenticated direct fetch of a known object path via the Supabase Storage REST API — must be denied.
+
+6. **Upload/download access.**
+   Upload a document through the real client flow (`POST /api/documents`) — confirm it lands in the bucket under `<assessmentId>/<documentId>-<filename>`, never a public path. Download it via `/admin/documents/[id]/download` — confirm a fresh, short-lived signed URL is issued each time (not a cached/reusable one) and a `document_accessed` audit event is recorded. Attempt the same download route unauthenticated — must redirect to login / return 401.
+
+7. **Submitted-assessment lifecycle.**
+   Drive one assessment through `DRAFT → SUBMITTED → LAWYER_REVIEW → APPROVED → CLIENT_REPORT_RELEASED` for real (the exact sequence `tests/pilot-ready.test.ts` already exercises against the in-memory adapter — re-run the equivalent against the live project, e.g. via the pilot fixture in §5). Confirm `assessments.status`, `.submitted_at`, `.approved_at`, `.approved_by` update correctly at each step, and that no client-facing write succeeds once the assessment leaves `DRAFT` (expect `423 locked`).
+
+8. **Audit events.**
+   After the run in step 7, `select event_type, actor_type, created_at from audit_events where assessment_id = '<id>' order by created_at;` must show, at minimum: `link_created`/`session_created`, `answer_submitted` (one or more), `document_uploaded`, `assessment_submitted`, `analysis_run`, `finding_reviewed` (one or more), `report_generated` (one or more), `assessment_approved`, `report_released`. Confirm no document content or extracted field values appear in any `metadata_json` — only structured identifiers/counts (spec §17: "no raw documents in logs").
+
+9. **Report storage.**
+   Confirm both an `internal` and a `client` report row exist in `reports` for the completed assessment, each `storage_path` following `<assessmentId>/reports/<type>-v<version>.html`, and that both actually exist as objects in the private bucket (`/admin/reports/[id]/download` resolves each with a fresh signed URL). Confirm the client report's HTML never contains a Rule ID (`grep -E "R-[A-Z]+-[0-9]{3}"` should find nothing) or a raw risk score, per spec §16.
+
+10. **Report-release protection.**
+    Before `approveAssessment` succeeds, attempt `releaseClientReport` directly — must fail with `not_approved`. Before every draft CRITICAL finding is resolved, attempt `approveAssessment` — must fail with `unresolved_critical_findings` and list the blocking finding id(s). Confirm the assessment never reaches `CLIENT_REPORT_RELEASED` by any path other than the explicit Release action (no automatic transition anywhere in the codebase — `grep -rn "CLIENT_REPORT_RELEASED" domain/` shows exactly one write site, `domain/review/releaseClientReport.ts`).
+
+## 4. What was actually verified this session, and what still needs a live project
+
+**No live Supabase project is reachable from this environment** (no Docker daemon for `supabase start`, no network egress to supabase.com or any external project, no credentials configured — `.env.local` does not exist, only `.env.example`). This is unchanged since Phase 1 (`OPEN_QUESTIONS.md` item 4/8).
+
+**What *was* freshly re-verified this session**, using the same local-PostgreSQL-16 stand-in methodology as Phase 1/2 (never committed, torn down immediately after): all 4 real migration files applied cleanly, in order, to a scratch database with a minimal hand-written stand-in for `auth.users`/`auth.uid()`/`storage.buckets`. Behavioral RLS testing — new for this pass, specifically targeting the three Phase 3 tables `rule_evaluations`/`findings`/`reports` (previously untested this way) — confirmed: a non-admin role gets 0 rows and a policy-violation error on write; the same role, matching a real `admin_profiles.id`, can read and write all three; reverting to a non-matching id blocks again; and the `override_requires_reason` check constraint on `findings` independently rejects an unreasoned severity override at the database level. The `assessment_status` enum's 6 values and order, and the storage bucket's `public = false`, were also directly confirmed.
+
+**What this does not verify, and genuinely cannot without a real Supabase project** (unchanged from item 8's own list, extended to Phase 3): real GoTrue-issued JWTs and `auth.uid()` behavior under a real authenticated session; PostgREST actually enforcing these policies for the `anon`/`authenticated` roles; Supabase Storage's actual bucket-policy enforcement; the service-role key's real RLS-bypass behavior; end-to-end HTTP behavior of any route (token exchange, uploads, admin actions) against a real database; and, specific to this phase, the synthetic extraction pipeline and the full Run Analysis → review → approve → release sequence running against real infrastructure rather than the in-memory adapter.
+
+**Every checklist item in §3 requires one of the two setups item 8 already names** (a machine/environment with a working Docker daemon running the Supabase CLI locally, or a real external Supabase project with its URL/anon key/service-role key/`ASSESSMENT_TOKEN_PEPPER` supplied as real environment variables) to complete. Neither is available here; none was fabricated.
+
+## 5. Synthetic pilot fixture
+
+One synthetic assessment, "עסק פיילוט לדוגמה בע\"מ", exercising every required element in one pass:
+
+1. **Branching**: `EMP-01` = `"לא"`, `EMP-02` = `"לא"` (triggers `R-EMP-001`); `TIME-06` = `"כן, באופן קבוע"` (now-reachable, per §2a), which opens `TIME-07`; `TIME-07` = `["רכיב שעות נוספות גלובלי"]` (opens `TIME-08`); `TIME-08` = `"לא יודעת"`.
+2. **Documents**: upload one `DOC-01` (employment agreement, at the `EMP-01` question) and one `DOC-04` (attendance report, at the `TIME-05` question) — both run through Run Analysis with the pilot-only fixture tag `B-overtime-mismatch` (§6). **`DOC-03` (payslip) is deliberately not part of the browser-driven fixture**: a fresh check found `questionnaire.csv` has no question at all whose `מסמך להעלאה` targets a payslip — `document_analysis_matrix.csv` defines `DOC-03` as an expected input, but no client-facing question ever offers to upload one. This is a separate, smaller gap (worth a future fix — likely a new upload attached to `PAY-01` or `SOC-01`, which `document_analysis_matrix.csv`'s own `DOC-03` row already lists as linked questions — but that is inventing a new question/UI element, not correcting an existing one's wiring, so it is out of this pass's "fix a defect, don't add a feature" scope). It does not block this fixture: the required cross-check contradiction (next) only needs `DOC-01`+`DOC-04`.
+3. **Cross-check contradiction**: the `B-overtime-mismatch` fixture set's `DOC-01`/`DOC-04` values (agreement assumes 20 global overtime hours; attendance shows 34 actual hours) produce `cross_check.time.global_overtime_attendance_mismatch` — the exact demonstration already covered by `tests/crosscheck.test.ts` and `tests/run-analysis.test.ts`. (`cross_check.pay.contract_payslip_mismatch`, which does need `DOC-03`, stays unavailable through the browser for the reason above — it is fully covered by the existing automated test suite instead.)
+4. **Positive finding**: `R-EMP-001` (no written agreement + no notice) and `R-TIME-003` (via the cross-check fact above) both match.
+5. **No-finding rule**: any rule whose condition genuinely doesn't hold on this fixture's answers — e.g. `R-SOC-001` (pension shortfalls) stays unmatched when `SOC-01` = `"כן"` (pension contributions made for everyone) is answered as part of the core question sweep.
+6. **Exposure scoring**: every matched rule's `riskScore`/`riskLevel` is visible in the findings section, computed per the conservative, `baseSeverity`-only formula (item 28) — `R-INC-001` (always-manual, `criticalOverride: true`) will also appear as a draft `CRITICAL` finding on every assessment, including this one.
+7. **Attorney review**: confirm/dismiss every finding, including the mandatory resolution of any draft CRITICAL finding before approval is possible.
+8. **Report preview**: generate both internal and client previews; confirm the client preview only shows findings explicitly marked visible.
+9. **Approval/release boundary**: attempt Release before Approve (must fail); Approve; then Release; confirm the assessment reaches `CLIENT_REPORT_RELEASED` only after both steps.
+
+Exact click-by-click steps are in `PILOT_RUNBOOK.md`.
+
+## 6. The two code changes made beyond the item-30/2b fixes, and why
+
+**Pilot fixture tag field.** `domain/extraction/syntheticProvider.ts` (task #43) requires an explicit `fixtureTag` to produce anything but a `failed` extraction — by design, so a real client's real document is never guessed at (item 25). The production admin "Run Analysis" action never passed one, which means step 5's cross-check contradiction and document-dependent findings could not be exercised through a real, browser-driven Run Analysis click — only through a test harness calling `runAnalysis()` directly.
+
+Per your explicit choice, a minimal, clearly-labeled "pilot fixture tag" `<select>` was added to the Run Analysis form (`app/(admin)/admin/assessments/[id]/page.tsx`), defaulting to blank, restricted to the four known synthetic fixture tags (never free text), with an amber-highlighted warning that it is pilot-only and must stay blank for a real client. Left blank, `runAnalysisAction` behaves byte-for-byte as before — no `fixtureTag` is ever passed, and extraction fails gracefully exactly as it must for a real document.
+
+**Document-type wiring fix (§2b).** Necessary for the pilot fixture's document-upload step to work at all through the real browser UI, for any document type other than `DOC-01` — not something that could be worked around with the fixture-tag field alone, since the extractor never even reaches its fixture-matching logic when `documentType` doesn't resolve to a known schema in the first place.
+
+No other product code was changed. Everything else in this pass is either a test, a documentation file, or a build-time-only correction (`scripts/import-csv.ts`, `domain/questionnaire/triggerValueFixes.ts`, `domain/questionnaire/documentTypeMapping.ts`) with zero runtime behavior difference for any value it doesn't explicitly touch.
+
+## 7. Status
+
+See the final report delivered alongside this plan (not duplicated here) for the `READY_FOR_ATTORNEY_PILOT` determination, blockers, what still needs manual/live verification, and the exact next action for the attorney.

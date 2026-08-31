@@ -13,6 +13,7 @@ function item(partial: Partial<QuestionnaireItem> & Pick<QuestionnaireItem, "ans
     triggerCondition: { type: "always" },
     followUp: "",
     documentRequest: "",
+    documentTypeId: null,
     internalCheck: "",
     possibleService: "",
     isCore: false,

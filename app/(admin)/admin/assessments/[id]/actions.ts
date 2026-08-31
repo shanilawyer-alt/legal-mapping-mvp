@@ -43,14 +43,35 @@ export async function deleteDocumentAction(assessmentId: string, documentId: str
   redirect(detailUrl);
 }
 
-/** "Run Analysis" — SUBMITTED -> LAWYER_REVIEW (domain/analysis/runAnalysis.ts). Never passes a fixtureTag: that path is test/pilot-only (OPEN_QUESTIONS.md item 25). */
-export async function runAnalysisAction(assessmentId: string): Promise<void> {
+/** Synthetic-only fixture tags a controlled pilot run may select (domain/extraction/fixtures.ts SYNTHETIC_FIXTURES) — never accepted as free text. */
+const PILOT_FIXTURE_TAGS = ["A-clean", "B-overtime-mismatch", "C-privacy-gap", "D-freelancer-dependency"] as const;
+
+/**
+ * "Run Analysis" — SUBMITTED -> LAWYER_REVIEW (domain/analysis/runAnalysis.ts).
+ *
+ * The optional `pilotFixtureTag` field exists solely so a controlled,
+ * attorney-run pilot (PILOT_VALIDATION_PLAN.md, PILOT_RUNBOOK.md) can
+ * exercise the synthetic document-extraction path through the real
+ * browser UI — no live AI provider exists in this environment
+ * (OPEN_QUESTIONS.md item 25), so without a fixture tag every document
+ * extraction correctly fails, exactly as it must for any real client's
+ * real documents. Left blank (the only valid choice once a real client
+ * is involved), this behaves exactly as before: no fixture tag is ever
+ * passed, and extraction fails gracefully rather than guessing.
+ */
+export async function runAnalysisAction(assessmentId: string, formData: FormData): Promise<void> {
   const detailUrl = `/admin/assessments/${assessmentId}`;
   const adminUserId = await getAdminUserId();
   if (!adminUserId) redirect("/admin/login");
 
+  const rawTag = formData.get("pilotFixtureTag");
+  const fixtureTag =
+    typeof rawTag === "string" && (PILOT_FIXTURE_TAGS as readonly string[]).includes(rawTag)
+      ? rawTag
+      : undefined;
+
   const repos = getRepositories();
-  const result = await runAnalysis(repos, assessmentId);
+  const result = await runAnalysis(repos, assessmentId, fixtureTag ? { fixtureTag } : {});
   if (!result.ok) {
     redirect(`${detailUrl}?error=${result.error}`);
   }
