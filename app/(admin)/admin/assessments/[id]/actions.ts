@@ -5,6 +5,12 @@ import { getRepositories } from "@/lib/db";
 import { getDocumentStore } from "@/lib/storage";
 import { getAdminUserId } from "@/lib/supabase/server";
 import { deleteDocumentAsAdmin } from "@/domain/documents/service";
+import { runAnalysis } from "@/domain/analysis/runAnalysis";
+import { reviewFinding } from "@/domain/review/reviewFinding";
+import { approveAssessment } from "@/domain/review/approveAssessment";
+import { releaseClientReport } from "@/domain/review/releaseClientReport";
+import { generatePreviewForAssessment } from "@/domain/review/generatePreview";
+import type { FindingReviewUpdate, FindingStatus } from "@/lib/db/types";
 
 /**
  * Server Actions for the admin assessment detail page. Both re-check
@@ -32,6 +38,116 @@ export async function deleteDocumentAction(assessmentId: string, documentId: str
   const result = await deleteDocumentAsAdmin(repos, store, assessmentId, documentId, adminUserId);
   if (!result.ok) {
     redirect(`${detailUrl}?error=document_not_found`);
+  }
+
+  redirect(detailUrl);
+}
+
+/** "Run Analysis" — SUBMITTED -> LAWYER_REVIEW (domain/analysis/runAnalysis.ts). Never passes a fixtureTag: that path is test/pilot-only (OPEN_QUESTIONS.md item 25). */
+export async function runAnalysisAction(assessmentId: string): Promise<void> {
+  const detailUrl = `/admin/assessments/${assessmentId}`;
+  const adminUserId = await getAdminUserId();
+  if (!adminUserId) redirect("/admin/login");
+
+  const repos = getRepositories();
+  const result = await runAnalysis(repos, assessmentId);
+  if (!result.ok) {
+    redirect(`${detailUrl}?error=${result.error}`);
+  }
+
+  redirect(detailUrl);
+}
+
+const REVIEW_STATUSES: readonly FindingStatus[] = ["draft", "confirmed", "modified", "dismissed"];
+
+/**
+ * One Server Action backing all six spec §15 finding actions (confirm /
+ * modify / dismiss / override severity / add note / visible-to-client
+ * toggle) — each admin control on the page submits a different subset of
+ * these form fields; only fields actually present in the submission are
+ * included in the update.
+ */
+export async function reviewFindingAction(
+  assessmentId: string,
+  findingId: string,
+  formData: FormData,
+): Promise<void> {
+  const detailUrl = `/admin/assessments/${assessmentId}`;
+  const adminUserId = await getAdminUserId();
+  if (!adminUserId) redirect("/admin/login");
+
+  const repos = getRepositories();
+  const update: FindingReviewUpdate = {};
+
+  const status = formData.get("status");
+  if (typeof status === "string" && REVIEW_STATUSES.includes(status as FindingStatus)) {
+    update.status = status as FindingStatus;
+  }
+
+  const visibleToClientRaw = formData.get("visibleToClient");
+  if (visibleToClientRaw !== null) {
+    update.visibleToClient = visibleToClientRaw === "true";
+  }
+
+  const lawyerNotes = formData.get("lawyerNotes");
+  if (typeof lawyerNotes === "string" && lawyerNotes.trim() !== "") {
+    update.lawyerNotes = lawyerNotes;
+  }
+
+  const severityOverrideRaw = formData.get("severityOverride");
+  if (typeof severityOverrideRaw === "string" && severityOverrideRaw.trim() !== "") {
+    update.severityOverride = Number(severityOverrideRaw);
+    const overrideReason = formData.get("overrideReason");
+    update.overrideReason = typeof overrideReason === "string" ? overrideReason : null;
+  }
+
+  const result = await reviewFinding(repos, findingId, update, adminUserId);
+  if (!result.ok) {
+    redirect(`${detailUrl}?error=${result.error}`);
+  }
+
+  redirect(detailUrl);
+}
+
+/** "Approve" — LAWYER_REVIEW -> APPROVED, blocked by any draft CRITICAL finding (spec §15). */
+export async function approveAssessmentAction(assessmentId: string): Promise<void> {
+  const detailUrl = `/admin/assessments/${assessmentId}`;
+  const adminUserId = await getAdminUserId();
+  if (!adminUserId) redirect("/admin/login");
+
+  const repos = getRepositories();
+  const result = await approveAssessment(repos, assessmentId, adminUserId);
+  if (!result.ok) {
+    redirect(`${detailUrl}?error=${result.error}`);
+  }
+
+  redirect(detailUrl);
+}
+
+/** Generates one report preview (internal or client) — never releases anything. */
+export async function generatePreviewAction(assessmentId: string, reportType: "internal" | "client"): Promise<void> {
+  const detailUrl = `/admin/assessments/${assessmentId}`;
+  const adminUserId = await getAdminUserId();
+  if (!adminUserId) redirect("/admin/login");
+
+  const repos = getRepositories();
+  const store = getDocumentStore();
+  await generatePreviewForAssessment(repos, store, assessmentId, reportType, adminUserId);
+
+  redirect(detailUrl);
+}
+
+/** "Release" — APPROVED -> CLIENT_REPORT_RELEASED, the one explicit client-facing boundary. */
+export async function releaseClientReportAction(assessmentId: string): Promise<void> {
+  const detailUrl = `/admin/assessments/${assessmentId}`;
+  const adminUserId = await getAdminUserId();
+  if (!adminUserId) redirect("/admin/login");
+
+  const repos = getRepositories();
+  const store = getDocumentStore();
+  const result = await releaseClientReport(repos, store, assessmentId, adminUserId);
+  if (!result.ok) {
+    redirect(`${detailUrl}?error=${result.error}`);
   }
 
   redirect(detailUrl);
