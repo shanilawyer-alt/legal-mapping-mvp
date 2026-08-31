@@ -91,7 +91,7 @@ async function answerAllCoreQuestions(rawSessionToken: string, overrides: Record
 }
 
 describe("PILOT_READY: one synthetic assessment completes the full end-to-end flow", () => {
-  it("steps 1-14: create, access, answer, upload, submit, analyze, review, approve, release, audit", async () => {
+  it("steps 1-14: create, access, answer, upload, submit, analyze, review, approve, blocked-release, audit", async () => {
     const { store, uploads } = createFakeStore();
 
     // --- Step 1: admin creates assessment. ---
@@ -240,14 +240,25 @@ describe("PILOT_READY: one synthetic assessment completes the full end-to-end fl
     if (!approved.ok) return;
     expect(approved.assessment.status).toBe("APPROVED");
 
+    // This assessment's analysis used the synthetic fixture provider (a
+    // real DOC-01 was uploaded and extracted via fixtureTag: "A-clean")
+    // — the pilot-mode safeguard must block release regardless of
+    // approval (PILOT_VALIDATION_PLAN.md's safeguards review: "release
+    // prevented when synthetic facts materially contribute"). A fully
+    // successful release with no synthetic data involved is covered
+    // separately by tests/review-actions.test.ts.
     const released = await releaseClientReport(repos, store, submitted.assessment.id, "attorney-1");
-    expect(released.ok).toBe(true);
-    if (!released.ok) return;
-    expect(released.assessment.status).toBe("CLIENT_REPORT_RELEASED");
+    expect(released.ok).toBe(false);
+    if (released.ok) return;
+    expect(released.error).toBe("synthetic_data_used");
 
-    const releasedHtml = uploads.get(released.report.storagePath)!.data.toString("utf-8");
-    expect(releasedHtml).toContain("היעדר מסמך תנאי עבודה"); // the confirmed, visible finding reached the client report
-    expect(releasedHtml).not.toMatch(/R-EMP-\d{3}/); // Rule IDs never appear in the client report (spec §16)
+    const stillApproved = await repos.assessments.getById(submitted.assessment.id);
+    expect(stillApproved?.status).toBe("APPROVED"); // never reaches CLIENT_REPORT_RELEASED
+
+    const clientPreviewHtml = uploads.get(clientPreview.storagePath)!.data.toString("utf-8");
+    expect(clientPreviewHtml).toContain("דוח פיילוט"); // synthetic-data banner (safeguard: "synthetic report clearly marked")
+    expect(clientPreviewHtml).toContain("היעדר מסמך תנאי עבודה"); // the confirmed, visible finding still appears in the preview
+    expect(clientPreviewHtml).not.toMatch(/R-EMP-\d{3}/); // Rule IDs never appear in the client report (spec §16)
 
     // --- Step 14: audit trail shows the relevant lifecycle. ---
     const auditEvents = await repos.audit.listByAssessment(submitted.assessment.id);
@@ -260,7 +271,6 @@ describe("PILOT_READY: one synthetic assessment completes the full end-to-end fl
       "finding_reviewed",
       "report_generated",
       "assessment_approved",
-      "report_released",
     ]) {
       expect(eventTypes.has(expected)).toBe(true);
     }

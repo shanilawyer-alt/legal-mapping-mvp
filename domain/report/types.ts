@@ -42,4 +42,6 @@ export interface ReportData {
   findings: readonly ReportFindingView[];
   /** Internal report only — see OPEN_QUESTIONS.md item 27/29 for why no level is shown. */
   freelancerScreening: FreelancerScreeningResult | null;
+  /** True when any contributing document extraction came from the synthetic/fixture provider (pilot mode) — rendered as a prominent banner, on every report type, never silently hidden. */
+  usedSyntheticData: boolean;
 }

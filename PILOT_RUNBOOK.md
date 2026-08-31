@@ -47,7 +47,7 @@ When every required question is answered, proceed to the review screen and click
 ## Phase 3 — Run Analysis (back in your admin browser window)
 
 1. Return to your admin session. On `/admin`, open the new assessment (it should show status "נשלח — ממתין לניתוח").
-2. In the profile section, find the amber-highlighted "הרצת ניתוח" (Run Analysis) box.
+2. In the profile section, find the "הרצת ניתוח" (Run Analysis) box. **If it is not amber-highlighted with a fixture-tag dropdown inside it, `PILOT_SYNTHETIC_MODE_ENABLED` is not set to `true` in this deployment — stop and fix that first (`ATTORNEY_PILOT_START_HERE.md` §B/§C).**
 3. In its "תג פיקסצ'ר לפיילוט מבוקר בלבד" dropdown, select **`B-overtime-mismatch`**. (Never do this for a real client — leave it blank.)
 4. Click "הרצת ניתוח" and confirm the dialog. The page reloads with status "בבדיקת עורך/ת דין".
 
@@ -71,16 +71,17 @@ For each finding in the "ממצאים" section:
 1. In the "דוחות" (reports) section, click "יצירת תצוגה מקדימה — דוח פנימי" (generate internal preview). Click "צפייה" on the new row — confirm it shows every finding, including risk scores, Rule IDs, and the facts that triggered each one.
 2. Click "יצירת תצוגה מקדימה — דוח ללקוח" (generate client preview). Click "צפייה" — confirm it shows **only** the findings you toggled visible in Phase 4, with a risk *label* (e.g. "בינוני") rather than a raw score, and **no** Rule IDs, legal-source links, or internal notes anywhere in the page.
 
-## Phase 6 — Approval and release boundary
+## Phase 6 — Approval and the release boundary (release is expected to be BLOCKED)
 
-1. Attempt to release before approving: there is no Release button yet — confirm it is genuinely absent while status is "בבדיקת עורך/ת דין". This is the boundary working correctly, not a missing feature.
+1. Attempt to release before approving: the "שליחת דוח ללקוח" button is genuinely absent while status is "בבדיקת עורך/ת דין". This is the boundary working correctly, not a missing feature.
 2. Once every `CRITICAL` finding is resolved (Phase 4), click "אישור מיפוי" (approve) in the profile section and confirm the dialog. Status changes to "אושר". If it doesn't — the confirmation dialog or an error banner will say a `CRITICAL` finding is still unresolved; go back to Phase 4.
-3. A "שליחת דוח ללקוח" (send report to client) button now appears. Click it and confirm the dialog. Status changes to "דוח נשלח ללקוח".
-4. Generate one more client-report preview (Phase 5, step 2) and confirm its content matches the findings you had marked visible at the moment you clicked Release.
+3. A "שליחת דוח ללקוח" (send report to client) button now appears. Click it and confirm the dialog.
+4. **Expected result: this fails.** An error banner reading "לא ניתן לשלוח דוח ללקוח: הניתוח בוצע באמצעות נתוני בדיקה סינתטיים..." appears, and the status stays "אושר" — it never reaches "דוח נשלח ללקוח". This is the release-protection safeguard working as designed: any assessment analyzed with a pilot fixture tag can never be released to a client, no matter how thoroughly it was reviewed and approved. If release instead succeeds, **stop — this is a safeguard failure, not a pass.**
+5. Generate one more preview (Phase 5) and confirm both the internal and client preview HTML show the amber "⚠ דוח פיילוט" banner at the top.
 
 ## Phase 7 — Audit trail check
 
-Scroll to "יומן פעילות" (activity log) at the bottom of the page. Confirm it lists, in order: the secure link being opened, each answer saved, the document uploads, the questionnaire submission, "ניתוח הורץ" (analysis run), one or more "ממצא נבדק" (finding reviewed) entries, "תצוגה מקדימה של דוח נוצרה" (report preview generated) entries, "המיפוי אושר" (assessment approved), and "דוח נשלח ללקוח" (report released).
+Scroll to "יומן פעילות" (activity log) at the bottom of the page. Confirm it lists, in order: the secure link being opened, each answer saved, the document uploads, the questionnaire submission, "ניתוח הורץ" (analysis run), one or more "ממצא נבדק" (finding reviewed) entries, "תצוגה מקדימה של דוח נוצרה" (report preview generated) entries, and "המיפוי אושר" (assessment approved). There should be **no** "דוח נשלח ללקוח" (report released) entry — release was blocked in Phase 6.
 
 ---
 

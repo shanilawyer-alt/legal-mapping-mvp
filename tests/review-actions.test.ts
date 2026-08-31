@@ -279,6 +279,76 @@ describe("releaseClientReport", () => {
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.error).toBe("not_approved");
   });
+
+  it("blocks release when a completed synthetic-provider extraction contributed, even once approved (pilot-mode safeguard)", async () => {
+    const { store } = createFakeStore();
+    const { assessment } = await setupAnalyzedAssessment({ "SOC-01": "לא" });
+    await confirmAllCriticalFindings(assessment.id);
+
+    const document = await repos.documents.create({
+      assessmentId: assessment.id,
+      documentType: "DOC-01",
+      storagePath: `${assessment.id}/doc-1.pdf`,
+      originalFilename: "agreement.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 100,
+      sha256: "irrelevant",
+      uploadStatus: "uploaded",
+    });
+    await repos.documentExtractions.create({
+      documentId: document.id,
+      schemaName: "employment_agreement",
+      schemaVersion: "V1",
+      provider: "synthetic",
+      model: "fixture-v1",
+      extractionJson: { employmentType: "שכיר" },
+      confidenceJson: {},
+      evidenceJson: {},
+      status: "completed",
+    });
+
+    const approved = await approveAssessment(repos, assessment.id, "attorney-1");
+    expect(approved.ok).toBe(true);
+
+    const result = await releaseClientReport(repos, store, assessment.id, "attorney-1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("synthetic_data_used");
+
+    const stored = await repos.assessments.getById(assessment.id);
+    expect(stored?.status).toBe("APPROVED"); // never advances to CLIENT_REPORT_RELEASED
+  });
+
+  it("does not block release when a document extraction exists but failed (never contributed synthetic facts)", async () => {
+    const { store } = createFakeStore();
+    const { assessment } = await setupAnalyzedAssessment({ "SOC-01": "לא" });
+    await confirmAllCriticalFindings(assessment.id);
+
+    const document = await repos.documents.create({
+      assessmentId: assessment.id,
+      documentType: "DOC-01",
+      storagePath: `${assessment.id}/doc-1.pdf`,
+      originalFilename: "agreement.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 100,
+      sha256: "irrelevant",
+      uploadStatus: "uploaded",
+    });
+    await repos.documentExtractions.create({
+      documentId: document.id,
+      schemaName: "employment_agreement",
+      schemaVersion: "V1",
+      provider: "synthetic",
+      model: "fixture-v1",
+      extractionJson: {},
+      confidenceJson: {},
+      evidenceJson: {},
+      status: "failed",
+    });
+
+    await approveAssessment(repos, assessment.id, "attorney-1");
+    const result = await releaseClientReport(repos, store, assessment.id, "attorney-1");
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe("generatePreviewForAssessment", () => {

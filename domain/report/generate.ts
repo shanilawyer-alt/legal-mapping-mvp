@@ -36,14 +36,26 @@ export async function generateReportPreview(
   freelancerScreening: FreelancerScreeningResult | null,
   generatedBy: string | null,
 ): Promise<Report> {
-  const [findings, evaluations, existingReports] = await Promise.all([
+  const [findings, evaluations, existingReports, extractions] = await Promise.all([
     repos.findings.listByAssessment(assessmentId),
     repos.ruleEvaluations.listByAssessment(assessmentId),
     repos.reports.listByAssessment(assessmentId),
+    repos.documentExtractions.listByAssessment(assessmentId),
   ]);
+  // Pilot-mode marker (safeguard: "synthetic report clearly marked" —
+  // see PILOT_VALIDATION_PLAN.md's safeguards review). Real provenance
+  // already recorded on document_extractions.provider, not a new flag.
+  const usedSyntheticData = extractions.some((e) => e.provider === "synthetic" && e.status === "completed");
 
   const ruleEvaluationsById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
-  const data = buildReportData(assessmentId, reportType, findings, ruleEvaluationsById, freelancerScreening);
+  const data = buildReportData(
+    assessmentId,
+    reportType,
+    findings,
+    ruleEvaluationsById,
+    freelancerScreening,
+    usedSyntheticData,
+  );
   const html = renderReportHtml(data);
 
   const version = existingReports.filter((r) => r.reportType === reportType).length + 1;

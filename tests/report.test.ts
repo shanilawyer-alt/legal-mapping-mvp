@@ -83,6 +83,7 @@ describe("buildReportData", () => {
       [finding],
       new Map([[evaluation.id, evaluation]]),
       null,
+      false,
     );
     expect(data.findings).toHaveLength(1);
     expect(data.findings[0].ruleId).toBe("R-EMP-001");
@@ -93,7 +94,7 @@ describe("buildReportData", () => {
 
   it("client report excludes findings not marked visibleToClient", () => {
     const finding = makeFinding({ visibleToClient: false });
-    const data = buildReportData("assessment-1", "client", [finding], new Map(), null);
+    const data = buildReportData("assessment-1", "client", [finding], new Map(), null, false);
     expect(data.findings).toHaveLength(0);
     expect(data.summary.totalFindings).toBe(0);
   });
@@ -101,7 +102,7 @@ describe("buildReportData", () => {
   it("client report includes only visibleToClient findings, with score/confidence/evidence hidden", () => {
     const visible = makeFinding({ id: "f-visible", visibleToClient: true, riskLevel: "HIGH" });
     const hidden = makeFinding({ id: "f-hidden", visibleToClient: false });
-    const data = buildReportData("assessment-1", "client", [visible, hidden], new Map(), null);
+    const data = buildReportData("assessment-1", "client", [visible, hidden], new Map(), null, false);
     expect(data.findings).toHaveLength(1);
     expect(data.findings[0].findingId).toBe("f-visible");
     expect(data.findings[0].riskScore).toBeNull();
@@ -116,7 +117,7 @@ describe("buildReportData", () => {
   it("client confidence caveat shows only when confidence is 1 (self-report only)", () => {
     const lowConfidence = makeFinding({ visibleToClient: true, confidence: 1 });
     const highConfidence = makeFinding({ id: "f2", visibleToClient: true, confidence: 4 });
-    const data = buildReportData("assessment-1", "client", [lowConfidence, highConfidence], new Map(), null);
+    const data = buildReportData("assessment-1", "client", [lowConfidence, highConfidence], new Map(), null, false);
     const [f1, f2] = data.findings;
     expect(f1.confidenceCaveat).toBe("נדרש אימות");
     expect(f2.confidenceCaveat).toBeNull();
@@ -128,7 +129,7 @@ describe("buildReportData", () => {
       makeFinding({ id: "f2", riskLevel: "LOW" }),
       makeFinding({ id: "f3", riskLevel: "CRITICAL" }),
     ];
-    const data = buildReportData("assessment-1", "internal", findings, new Map(), null);
+    const data = buildReportData("assessment-1", "internal", findings, new Map(), null, false);
     expect(data.summary.totalFindings).toBe(3);
     expect(data.summary.countByRiskLevel.LOW).toBe(2);
     expect(data.summary.countByRiskLevel.CRITICAL).toBe(1);
@@ -141,8 +142,8 @@ describe("buildReportData", () => {
       indicators: [],
       disclosure: "The screening score reflects accumulated factual indicators and does not determine the legal status of the service provider.",
     };
-    const internal = buildReportData("assessment-1", "internal", [], new Map(), screening);
-    const client = buildReportData("assessment-1", "client", [], new Map(), screening);
+    const internal = buildReportData("assessment-1", "internal", [], new Map(), screening, false);
+    const client = buildReportData("assessment-1", "client", [], new Map(), screening, false);
     expect(internal.freelancerScreening).toEqual(screening);
     expect(client.freelancerScreening).toBeNull();
   });
@@ -156,6 +157,7 @@ describe("buildReportData", () => {
       [finding],
       new Map([["eval-1", evaluation]]),
       null,
+      false,
     );
     expect(data.findings[0].possibleService).toBe("הסכמי עבודה/הודעות לעובד");
   });
@@ -163,7 +165,7 @@ describe("buildReportData", () => {
 
 describe("renderReportHtml", () => {
   it("produces a well-formed RTL Hebrew HTML document", () => {
-    const data = buildReportData("assessment-1", "internal", [makeFinding({})], new Map(), null);
+    const data = buildReportData("assessment-1", "internal", [makeFinding({})], new Map(), null, false);
     const html = renderReportHtml(data);
     expect(html).toContain('<html lang="he" dir="rtl">');
     expect(html).toContain("היעדר מסמך תנאי עבודה");
@@ -171,16 +173,28 @@ describe("renderReportHtml", () => {
 
   it("HTML-escapes finding content to prevent injection", () => {
     const finding = makeFinding({ internalTitle: '<script>alert(1)</script>' });
-    const data = buildReportData("assessment-1", "internal", [finding], new Map(), null);
+    const data = buildReportData("assessment-1", "internal", [finding], new Map(), null, false);
     const html = renderReportHtml(data);
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;");
   });
 
   it("shows 'no findings' message for an empty client report", () => {
-    const data = buildReportData("assessment-1", "client", [], new Map(), null);
+    const data = buildReportData("assessment-1", "client", [], new Map(), null, false);
     const html = renderReportHtml(data);
     expect(html).toContain("אין ממצאים להצגה");
+  });
+
+  it("shows a prominent synthetic-data banner when usedSyntheticData is true, on both report types", () => {
+    const internal = buildReportData("assessment-1", "internal", [], new Map(), null, true);
+    const client = buildReportData("assessment-1", "client", [], new Map(), null, true);
+    expect(renderReportHtml(internal)).toContain("דוח פיילוט");
+    expect(renderReportHtml(client)).toContain("דוח פיילוט");
+  });
+
+  it("shows no synthetic-data banner when usedSyntheticData is false", () => {
+    const data = buildReportData("assessment-1", "internal", [], new Map(), null, false);
+    expect(renderReportHtml(data)).not.toContain("דוח פיילוט");
   });
 });
 

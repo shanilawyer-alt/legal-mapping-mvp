@@ -17,6 +17,16 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
+  /**
+   * Gates the pilot-only synthetic-extraction fixture control on the
+   * admin Run Analysis form (PILOT_VALIDATION_PLAN.md §6,
+   * OPEN_QUESTIONS.md item 25). Must be explicitly set to `"true"` in a
+   * deployment for the fixture-tag `<select>` to render at all, and for
+   * `runAnalysisAction` to honor a submitted tag — absent, empty, or any
+   * other value means disabled, the safe default. Never enable this in
+   * a deployment serving real clients.
+   */
+  PILOT_SYNTHETIC_MODE_ENABLED: z.enum(["true", "false"]).optional().default("false"),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -41,4 +51,9 @@ export function getEnv(): Env {
 
   cached = parsed.data;
   return cached;
+}
+
+/** True only when PILOT_SYNTHETIC_MODE_ENABLED="true" is explicitly set — false is the safe default. */
+export function isPilotSyntheticModeEnabled(): boolean {
+  return getEnv().PILOT_SYNTHETIC_MODE_ENABLED === "true";
 }

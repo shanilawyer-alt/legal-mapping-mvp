@@ -58,6 +58,7 @@ export function buildReportData(
   allFindings: readonly Finding[],
   ruleEvaluationsById: ReadonlyMap<string, RuleEvaluation>,
   freelancerScreening: FreelancerScreeningResult | null,
+  usedSyntheticData: boolean,
 ): ReportData {
   const findings = reportType === "client" ? allFindings.filter((f) => f.visibleToClient) : allFindings;
 
@@ -70,5 +71,6 @@ export function buildReportData(
     // Item 29 §3: no LOW/MEDIUM/SIGNIFICANT/HIGH level exists (item 27), so
     // the client report never shows this section at all.
     freelancerScreening: reportType === "internal" ? freelancerScreening : null,
+    usedSyntheticData,
   };
 }

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getRepositories } from "@/lib/db";
 import { getDocumentStore } from "@/lib/storage";
 import { getAdminUserId } from "@/lib/supabase/server";
+import { isPilotSyntheticModeEnabled } from "@/lib/security/env";
 import { deleteDocumentAsAdmin } from "@/domain/documents/service";
 import { runAnalysis } from "@/domain/analysis/runAnalysis";
 import { reviewFinding } from "@/domain/review/reviewFinding";
@@ -55,16 +56,21 @@ const PILOT_FIXTURE_TAGS = ["A-clean", "B-overtime-mismatch", "C-privacy-gap", "
  * browser UI — no live AI provider exists in this environment
  * (OPEN_QUESTIONS.md item 25), so without a fixture tag every document
  * extraction correctly fails, exactly as it must for any real client's
- * real documents. Left blank (the only valid choice once a real client
- * is involved), this behaves exactly as before: no fixture tag is ever
- * passed, and extraction fails gracefully rather than guessing.
+ * real documents. It is honored only when `PILOT_SYNTHETIC_MODE_ENABLED`
+ * is explicitly `"true"` (a deployment flag, absent/false by default —
+ * see `lib/security/env.ts`) — a value submitted with pilot mode off is
+ * silently ignored, not merely hidden in the UI, since this check runs
+ * server-side regardless of what the client actually sent. Left blank,
+ * or with pilot mode disabled, this behaves exactly as before: no
+ * fixture tag is ever passed, and extraction fails gracefully rather
+ * than guessing.
  */
 export async function runAnalysisAction(assessmentId: string, formData: FormData): Promise<void> {
   const detailUrl = `/admin/assessments/${assessmentId}`;
   const adminUserId = await getAdminUserId();
   if (!adminUserId) redirect("/admin/login");
 
-  const rawTag = formData.get("pilotFixtureTag");
+  const rawTag = isPilotSyntheticModeEnabled() ? formData.get("pilotFixtureTag") : null;
   const fixtureTag =
     typeof rawTag === "string" && (PILOT_FIXTURE_TAGS as readonly string[]).includes(rawTag)
       ? rawTag

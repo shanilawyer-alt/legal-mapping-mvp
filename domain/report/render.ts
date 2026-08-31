@@ -95,10 +95,16 @@ export function renderReportHtml(data: ReportData): string {
   .category { color: #555; font-size: 0.9rem; }
   .disclosure { font-style: italic; color: #555; }
   pre { white-space: pre-wrap; font-size: 0.8rem; background: #f5f5f5; padding: 0.5rem; }
+  .synthetic-banner { border: 3px solid #b45309; background: #fffbeb; color: #92400e; font-weight: bold; padding: 1rem; margin-bottom: 1.5rem; border-radius: 8px; }
 </style>
 </head>
 <body>
   <h1>${esc(title)}</h1>
+  ${
+    data.usedSyntheticData
+      ? `<div class="synthetic-banner">⚠ דוח פיילוט — מבוסס על נתוני בדיקה סינתטיים (Synthetic Pilot Data). אינו מבוסס על חילוץ אמיתי ממסמכים ואסור לשלוח אותו ללקוח.</div>`
+      : ""
+  }
   <p>מזהה הערכה: ${esc(data.assessmentId)}</p>
   <p>נוצר בתאריך: ${esc(data.generatedAt)}</p>
 

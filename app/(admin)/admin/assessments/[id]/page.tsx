@@ -9,6 +9,7 @@ import { buildFactBundle } from "@/domain/facts/bundle";
 import { runCrossChecks } from "@/domain/crosscheck";
 import { RULE_CATALOG_BY_ID } from "@/domain/rules/catalog";
 import type { FindingStatus, RiskLevel } from "@/lib/db/types";
+import { isPilotSyntheticModeEnabled } from "@/lib/security/env";
 import {
   deleteDocumentAction,
   runAnalysisAction,
@@ -41,6 +42,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   unresolved_critical_findings: "לא ניתן לאשר: קיימים ממצאים ברמת סיכון קריטית שטרם נבדקו (טיוטה).",
   not_approved: "ניתן לשלוח דוח ללקוח רק לאחר אישור המיפוי.",
   override_requires_reason: "שינוי חומרה ידני מחייב נימוק.",
+  synthetic_data_used:
+    "לא ניתן לשלוח דוח ללקוח: הניתוח בוצע באמצעות נתוני בדיקה סינתטיים (מצב פיילוט), לא באמצעות חילוץ אמיתי ממסמכים.",
 };
 
 const AUDIT_EVENT_LABELS: Record<string, string> = {
@@ -154,6 +157,10 @@ export default async function AdminAssessmentDetailPage({
   const canRunAnalysis = assessment.status === "SUBMITTED";
   const canApprove = assessment.status === "LAWYER_REVIEW";
   const canRelease = assessment.status === "APPROVED";
+  const pilotSyntheticModeEnabled = isPilotSyntheticModeEnabled();
+  const usedSyntheticData = documentExtractions.some(
+    (e) => e.provider === "synthetic" && e.status === "completed",
+  );
 
   return (
     <div className="space-y-8">
@@ -206,22 +213,28 @@ export default async function AdminAssessmentDetailPage({
             {canRunAnalysis ? (
               <form
                 action={runAnalysisAction.bind(null, assessment.id)}
-                className="flex flex-col items-end gap-1 rounded-md border border-dashed border-amber-300 bg-amber-50 p-2"
+                className={
+                  pilotSyntheticModeEnabled
+                    ? "flex flex-col items-end gap-1 rounded-md border border-dashed border-amber-300 bg-amber-50 p-2"
+                    : undefined
+                }
               >
-                <label className="text-xs text-amber-800">
-                  תג פיקסצ&apos;ר לפיילוט מבוקר בלבד — יש להשאיר ריק עבור לקוח אמיתי
-                  <select
-                    name="pilotFixtureTag"
-                    defaultValue=""
-                    className="mt-1 block w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs"
-                  >
-                    <option value="">— ריק (התנהגות אמיתית, ללא חילוץ AI) —</option>
-                    <option value="A-clean">A-clean</option>
-                    <option value="B-overtime-mismatch">B-overtime-mismatch</option>
-                    <option value="C-privacy-gap">C-privacy-gap</option>
-                    <option value="D-freelancer-dependency">D-freelancer-dependency</option>
-                  </select>
-                </label>
+                {pilotSyntheticModeEnabled ? (
+                  <label className="text-xs text-amber-800">
+                    תג פיקסצ&apos;ר לפיילוט מבוקר בלבד — יש להשאיר ריק עבור לקוח אמיתי
+                    <select
+                      name="pilotFixtureTag"
+                      defaultValue=""
+                      className="mt-1 block w-full rounded border border-amber-300 bg-white px-2 py-1 text-xs"
+                    >
+                      <option value="">— ריק (התנהגות אמיתית, ללא חילוץ AI) —</option>
+                      <option value="A-clean">A-clean</option>
+                      <option value="B-overtime-mismatch">B-overtime-mismatch</option>
+                      <option value="C-privacy-gap">C-privacy-gap</option>
+                      <option value="D-freelancer-dependency">D-freelancer-dependency</option>
+                    </select>
+                  </label>
+                ) : null}
                 <ConfirmSubmitButton
                   confirmMessage="להריץ ניתוח על המיפוי? הפעולה תסמן את המיפוי כ'בבדיקת עורך/ת דין' ולא ניתן יהיה להריץ שוב. תג פיקסצ'ר משמש לפיילוט מבוקר בלבד — לעולם לא עבור לקוח אמיתי."
                   className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
@@ -243,7 +256,11 @@ export default async function AdminAssessmentDetailPage({
             {canRelease ? (
               <form action={releaseClientReportAction.bind(null, assessment.id)}>
                 <ConfirmSubmitButton
-                  confirmMessage="לשלוח דוח ללקוח? הפעולה בלתי הפיכה — הדוח יכלול רק ממצאים שסומנו כגלויים ללקוח."
+                  confirmMessage={
+                    usedSyntheticData
+                      ? "המיפוי נותח באמצעות נתוני בדיקה סינתטיים — השליחה תיחסם. להמשיך בכל זאת ולראות את הודעת החסימה?"
+                      : "לשלוח דוח ללקוח? הפעולה בלתי הפיכה — הדוח יכלול רק ממצאים שסומנו כגלויים ללקוח."
+                  }
                   className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
                 >
                   שליחת דוח ללקוח
@@ -252,6 +269,12 @@ export default async function AdminAssessmentDetailPage({
             ) : null}
           </div>
         </div>
+        {usedSyntheticData ? (
+          <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-900">
+            ⚠ מיפוי זה נותח באמצעות נתוני בדיקה סינתטיים (מצב פיילוט) — אינו מבוסס על חילוץ
+            אמיתי ממסמכים, ולא ניתן יהיה לשלוח ממנו דוח ללקוח.
+          </div>
+        ) : null}
         <dl className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
           <Field label="שם העסק" value={organization?.legalName ?? "—"} />
           <Field label="סטטוס" value={ASSESSMENT_STATUS_LABELS[assessment.status]} />
